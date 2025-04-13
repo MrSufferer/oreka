@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 import { Box, Button, Input, VStack, useToast, HStack, Icon, SimpleGrid, Text, Select, Divider, Progress, InputGroup, InputRightAddon, Spinner, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Tooltip, InputRightElement } from '@chakra-ui/react';
 import { FaEthereum, FaWallet, FaArrowUp, FaArrowDown, FaClock } from 'react-icons/fa';
-import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketABI.json';
+import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketChainlinkABI.json';
 import Factory from '../contracts/abis/FactoryABI.json';  // ABI of Factory contract
 import { FACTORY_ADDRESS } from '../config/contracts';
 import { setContractTradingPair } from '../config/tradingPairs';
@@ -10,6 +10,8 @@ import { useAuth } from '../context/AuthContext';
 import { UnorderedList, ListItem } from '@chakra-ui/react';
 import { PriceService } from '../services/PriceService';
 import { format, toZonedTime } from 'date-fns-tz';
+import { formatStrikePriceForContract } from '../utils/priceFeeds';
+
 
 interface OwnerProps {
   address: string;
@@ -20,6 +22,7 @@ interface Coin {
   value: string;
   label: string;
   currentPrice: number;
+  priceFeedAddress: string;
 }
 
 // Add constant for converting real number
@@ -57,9 +60,8 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
   
   // Available trading pairs with current prices
   const [availableCoins, setAvailableCoins] = useState<Coin[]>([
-    { value: "BTCUSD", label: "BTC/USD", currentPrice: 47406.92 },
-    { value: "ETHUSD", label: "ETH/USD", currentPrice: 3521.45 },
-    { value: "ICPUSD", label: "ICP/USD", currentPrice: 12.87 }
+    { value: "BTCUSD", label: "BTC/USD", currentPrice: 47406.92, priceFeedAddress: "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43" },
+    { value: "ETHUSD", label: "ETH/USD", currentPrice: 3521.45, priceFeedAddress: "0x694AA1769357215DE4FAC081bf1f309aDC325306" },
   ]);
 
   // State for market creator fee
@@ -110,7 +112,7 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       const deployData = factory.getDeployTransaction(
         strikePriceValue,
         await signer.getAddress(),
-        selectedCoin.label,
+        selectedCoin.priceFeedAddress,
         maturityTimestamp,
         feeValue
       ).data || '0x';
@@ -285,15 +287,15 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       // Convert float to large integer
       const strikePriceFloat = parseFloat(strikePrice);
       const strikePriceInteger = Math.round(strikePriceFloat * STRIKE_PRICE_MULTIPLIER);
-      const strikePriceValue = ethers.BigNumber.from(strikePriceInteger.toString());
+      const strikePriceValue = ethers.BigNumber.from(strikePriceInteger);
       
       const maturityTimestamp = Math.floor(new Date(`${maturityDate} ${maturityTime}`).getTime() / 1000);
       
       // Convert fee to integer (multiply by 10 to handle decimal)
       const feeValue = Math.round(parseFloat(feePercentage) * 10);
-
-      // Sample index background (using 5 as an example for estimation)
-      const indexBg = 5;
+      
+      // QUAN TRỌNG: Chuẩn hóa địa chỉ price feed
+      const normalizedPriceFeedAddress = ethers.utils.getAddress(selectedCoin.priceFeedAddress);
 
       // Create contract factory to estimate gas
       const factory = new ethers.ContractFactory(
@@ -302,17 +304,17 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
         signer
       );
 
-      // Estimate gas for deployment - add indexBg here
+      // Estimate gas for deployment 
       const estimatedGas = await provider.estimateGas({
         from: walletAddress,
         data: factory.getDeployTransaction(
           strikePriceValue,
           await signer.getAddress(),
-          selectedCoin.label,
+          normalizedPriceFeedAddress,
           maturityTimestamp,
-          feeValue,
-          indexBg
-        ).data || '0x'
+          feeValue
+        ).data || '0x',
+        gasLimit: ethers.utils.hexlify(3000000)
       });
 
       // Calculate gas fee based on current gas price
@@ -366,9 +368,32 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
     }
   };
   
+  // Kiểm tra mạng hiện tại trước khi triển khai
+  const checkNetwork = async () => {
+    const provider = new ethers.providers.Web3Provider(window.ethereum);
+    const network = await provider.getNetwork();
+    
+    // Sepolia chainId là 11155111
+    if (network.chainId !== 11155111) {
+      toast({
+        title: "Wrong Network",
+        description: "Please connect to Sepolia testnet",
+        status: "error",
+        duration: 5000,
+        isClosable: true
+      });
+      return false;
+    }
+    return true;
+  };
+
   // Deploy a new binary option market contract
   const deployContract = async () => {
     try {
+      // Kiểm tra mạng trước khi triển khai
+      const networkValid = await checkNetwork();
+      if (!networkValid) return;
+      
       // Validation checks
       if (!selectedCoin || !strikePrice || !maturityDate || !maturityTime ) {
         toast({
@@ -399,14 +424,14 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
       
-      // Convert float to large integer by multiplying with MULTIPLIER
-      const strikePriceFloat = parseFloat(strikePrice);
-      const strikePriceInteger = Math.round(strikePriceFloat * STRIKE_PRICE_MULTIPLIER);
-      const strikePriceValue = ethers.BigNumber.from(strikePriceInteger.toString());
+      // Convert float to large integer using utility function
+      const strikePriceInteger = formatStrikePriceForContract(strikePrice, STRIKE_PRICE_MULTIPLIER);
+      const strikePriceValue = ethers.BigNumber.from(strikePriceInteger);
 
       // Set gas price
       const overrides = {
-        gasPrice: ethers.utils.parseUnits(gasPrice, "gwei")
+        gasPrice: ethers.utils.parseUnits(gasPrice, "gwei"),
+        gasLimit: ethers.utils.hexlify(3000000) // Explicit gas limit to avoid estimation errors
       };
 
       const factory = new ethers.ContractFactory(
@@ -418,15 +443,26 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       // Convert fee to integer (multiply by 10 to handle decimal)
       const feeValue = Math.round(parseFloat(feePercentage) * 10);
 
-      // Deploy with maturityTimestamp, gas price and fee
+      const normalizedPriceFeedAddress = ethers.utils.getAddress(selectedCoin.priceFeedAddress);
+      
+      console.log("Deploying contract with parameters:", {
+        strikePrice: strikePriceValue.toString(),
+        owner: await signer.getAddress(),
+        priceFeedAddress: normalizedPriceFeedAddress,
+        maturityTime: maturityTimestamp,
+        feePercentage: feeValue
+      });
+
+      // Deploy with normalized parameters
       const contract = await factory.deploy(
-        strikePriceValue,
-        await signer.getAddress(),
-        selectedCoin.label,
-        maturityTimestamp,
-        feeValue,
+        strikePriceValue,                // int _strikePrice
+        await signer.getAddress(),       // address _owner
+        normalizedPriceFeedAddress,      // address _priceFeedAddress
+        maturityTimestamp,               // uint _maturityTime
+        feeValue,                        // uint _feePercentage
         overrides
       );
+      
       await contract.deployed();
 
       // Register with Factory
@@ -568,9 +604,8 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
         
         // Update available coins with current prices
         setAvailableCoins([
-          { value: "BTCUSD", label: "BTC/USD", currentPrice: 1 / parseFloat(rates.BTC) },
-          { value: "ETHUSD", label: "ETH/USD", currentPrice: 1 / parseFloat(rates.ETH) },
-          { value: "ICPUSD", label: "ICP/USD", currentPrice: 1 / parseFloat(rates.ICP) || 12.87 }
+          { value: "BTCUSD", label: "BTC/USD", currentPrice: 1 / parseFloat(rates.BTC), priceFeedAddress: "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43" },
+          { value: "ETHUSD", label: "ETH/USD", currentPrice: 1 / parseFloat(rates.ETH), priceFeedAddress: "0x694AA1769357215DE4FAC081bf1f309aDC325306" },
         ]);
       } catch (error) {
         console.error("Error fetching prices from Coinbase:", error);

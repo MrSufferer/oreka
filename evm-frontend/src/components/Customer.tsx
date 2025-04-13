@@ -18,7 +18,7 @@ import { PiChartLineUpLight } from "react-icons/pi";
 import { GrInProgress } from "react-icons/gr";
 import { ethers } from 'ethers';
 import { motion, useAnimation } from 'framer-motion';
-import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketABI.json';
+import BinaryOptionMarketChainlink from '../contracts/abis/BinaryOptionMarketChainlinkABI.json';
 import { PriceService, PriceData } from '../services/PriceService';
 import { useRouter } from 'next/router';
 import { useAuth } from '../context/AuthContext';
@@ -27,6 +27,12 @@ import MarketCharts from './charts/MarketCharts';
 import { format } from 'date-fns';
 import { formatTimeToLocal, getCurrentTimestamp, getTimeRemaining } from '../utils/timeUtils';
 import { STRIKE_PRICE_MULTIPLIER } from '../utils/constants';
+import { 
+  getTradingPairFromPriceFeed, 
+  getChartSymbolFromTradingPair,
+  formatStrikePriceFromContract,
+  formatStrikePriceForContract
+} from '../utils/priceFeeds';
 
 /**
  * Enums for market sides and phases
@@ -63,7 +69,6 @@ interface PositionPoint {
 interface CustomerProps {
   contractAddress?: string;
 }
-
 
 /**
  * Utility function to fetch market details from a contract
@@ -103,17 +108,6 @@ const getProviderAndSigner = async () => {
   await provider.send("eth_requestAccounts", []); // Yêu cầu kết nối ví
   const signer = provider.getSigner();
   return { provider, signer };
-};
-
-
-/**
- * Helper function to convert trading pair to chart symbol format
- * @param tradingPair - The trading pair string (e.g., "BTC/USD")
- * @returns Formatted chart symbol (e.g., "BTC-USD")
- */
-const getChartSymbolFromTradingPair = (tradingPair: string): string => {
-  if (!tradingPair) return '';
-  return tradingPair.replace('/', '-');
 };
 
 /**
@@ -223,7 +217,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           const { signer } = await getProviderAndSigner();
           const newContract = new ethers.Contract(
             contractAddress,
-            BinaryOptionMarket.abi,
+            BinaryOptionMarketChainlink.abi,
             signer
           );
           setContract(newContract);
@@ -294,7 +288,6 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         strikePrice,
         phase,
         deployTime,
-        tradingPair,
         maturityTime,
         oracleDetails,
         totalDeposited,
@@ -302,13 +295,13 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         resolveTime,
         longPosition,
         shortPosition,
-        feePercentage
+        feePercentage,
+        dataFeedAddress  // Get the Chainlink price feed address
       ] = await Promise.all([
         contract.positions(),
         contract.strikePrice(),
         contract.currentPhase(),
         contract.deployTime(),
-        contract.tradingPair(),
         contract.maturityTime(),
         contract.oracleDetails(),
         contract.totalDeposited(),
@@ -316,14 +309,18 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         contract.resolveTime(),
         contract.longBids(walletAddress),
         contract.shortBids(walletAddress),
-        contract.feePercentage()
+        contract.feePercentage(),
+        contract.dataFeed()  // Add this line to get the price feed address
       ]);
 
+      // Map the price feed address to trading pair
+      const tradingPair = getTradingPairFromPriceFeed(dataFeedAddress);
+      
       // Save trading pair to state
       setTradingPair(tradingPair);
 
       // Format trading pair for API and save to chartSymbol
-      const formattedSymbol = formatTradingPairForApi(tradingPair);
+      const formattedSymbol = getChartSymbolFromTradingPair(tradingPair);
       setChartSymbol(formattedSymbol);
 
       // Update total positions
@@ -348,8 +345,8 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       }
 
       // Update strikePrice - convert from integer (stored in blockchain) to float
-      const strikePriceInteger = ethers.utils.formatUnits(strikePrice, 0);
-      setStrikePrice((parseInt(strikePriceInteger) / STRIKE_PRICE_MULTIPLIER).toString());
+      const strikePriceInteger = strikePrice.toString();
+      setStrikePrice(formatStrikePriceFromContract(strikePriceInteger, 100000000));
 
       setMaturityTime(maturityTime.toNumber());
       setOracleDetails(oracleDetails);
@@ -750,7 +747,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
-      const contract = new ethers.Contract(contractAddress, BinaryOptionMarket.abi, signer);
+      const contract = new ethers.Contract(contractAddress, BinaryOptionMarketChainlink.abi, signer);
 
       const tx = await contract.startBidding();
       await tx.wait();
@@ -795,10 +792,15 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     };
   }, []);
 
-  // Improved useEffect for price history
+  // Update the price chart useEffect to use the correct symbol
   useEffect(() => {
     const fetchPriceHistory = async () => {
       try {
+        if (!chartSymbol || chartSymbol === 'Unknown') {
+          console.log('Invalid chart symbol, cannot fetch price history');
+          return;
+        }
+        
         console.log('Fetching price history for symbol:', chartSymbol);
         const priceService = PriceService.getInstance();
         const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
@@ -886,7 +888,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         const provider = new ethers.providers.Web3Provider(window.ethereum);
         const contract = new ethers.Contract(
           contractAddress,
-          BinaryOptionMarket.abi,
+          BinaryOptionMarketChainlink.abi,
           provider
         );
 
@@ -897,17 +899,21 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             strikePriceBN,
             phase,
             biddingStartTime,
-            tradingPair,
-            deployTimestamp,
-            feePercentage
+            maturityTime,
+            oracleDetails,
+            totalDeposited,
+            feePercentage,
+            dataFeedAddress  // Get the Chainlink price feed address
           ] = await Promise.all([
             contract.positions(),
             contract.strikePrice(),
             contract.currentPhase(),
             contract.biddingStartTime(),
-            contract.tradingPair().catch(() => 'Unknown'),
-            contract.deployTime(),
-            contract.feePercentage()
+            contract.maturityTime(),
+            contract.oracleDetails(),
+            contract.totalDeposited(),
+            contract.feePercentage(),
+            contract.dataFeed()  // Add this line to get the price feed address
           ]);
 
           // Update states
@@ -919,15 +925,21 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           const strikePriceFormatted = (parseInt(strikePriceInteger.toString()) / STRIKE_PRICE_MULTIPLIER).toFixed(2);
           setStrikePrice(strikePriceFormatted);
           setCurrentPhase(phase);
+          setMaturityTime(maturityTime.toNumber());
+          setOracleDetails(oracleDetails);
+          setTotalDeposited(parseFloat(ethers.utils.formatEther(totalDeposited)));
+          setFeePercentage(feePercentage.toString());
+
+          // Map the price feed address to trading pair
+          const tradingPair = getTradingPairFromPriceFeed(dataFeedAddress);
+          
+          // Save trading pair to state
           setTradingPair(tradingPair);
-          setBiddingStartTime(biddingStartTime.toNumber());
-          setDeployTime(deployTimestamp.toNumber());
-          // Set chart symbol based on trading pair
-          const symbol = tradingPair === "BTC/USD" ? "BTCUSDT" :
-            tradingPair === "ETH/USD" ? "ETHUSDT" :
-              tradingPair === "ICP/USD" ? "ICPUSDT" : "BTCUSDT";
-          setChartSymbol(symbol);
-          console.log("Chart symbol:", symbol);
+
+          // Format trading pair for API and save to chartSymbol
+          const formattedSymbol = getChartSymbolFromTradingPair(tradingPair);
+          setChartSymbol(formattedSymbol);
+
           // Update positions
           setPositions({
             long: parseFloat(ethers.utils.formatEther(positions.long)),
@@ -948,24 +960,6 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
 
     loadContractData();
   }, []);
-
-  // Improved useEffect for price chart
-  useEffect(() => {
-    const fetchPriceHistory = async () => {
-      try {
-        console.log('Fetching price history for symbol:', chartSymbol);
-        const priceService = PriceService.getInstance();
-        const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
-        setChartData(klines);
-      } catch (error) {
-        console.error("Error fetching price history:", error);
-      }
-    };
-
-    fetchPriceHistory();
-    const interval = setInterval(fetchPriceHistory, 60000);
-    return () => clearInterval(interval);
-  }, [chartSymbol]);
 
   // Add near other state declarations
   const phaseCircleProps = (phase: Phase) => {
