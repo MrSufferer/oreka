@@ -43,9 +43,12 @@ contract BinaryOptionMarket is Ownable {
     uint public resolveTime;
     string public tradingPair;
     uint public biddingStartTime; // Thêm biến state
+<<<<<<< HEAD
     
     // Thêm biến lưu index background
     uint8 public indexBg; // Số từ 1-10 để xác định background
+=======
+>>>>>>> main
 
     event Bid(Side side, address indexed account, uint value);
     event MarketResolved(string finalPrice, uint timeStamp);

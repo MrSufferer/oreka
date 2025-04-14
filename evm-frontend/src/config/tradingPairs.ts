@@ -9,7 +9,7 @@ export const CONTRACT_TRADING_PAIRS: { [key: string]: string } = {};
 
 export const setContractTradingPair = (contractAddress: string, tradingPair: string) => {
     CONTRACT_TRADING_PAIRS[contractAddress] = tradingPair;
-    
+
     localStorage.setItem('contractTradingPairs', JSON.stringify(CONTRACT_TRADING_PAIRS));
 };
 

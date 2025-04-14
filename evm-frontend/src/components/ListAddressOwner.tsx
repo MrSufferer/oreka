@@ -702,7 +702,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                 {parseFloat(balance).toFixed(4)} ETH
               </Text>
             </HStack>
-{/* Connected wallet address (shortened) */}
+            {/* Connected wallet address (shortened) */}
             <Button
               leftIcon={<FaWallet />}
               colorScheme="blue"
@@ -1011,7 +1011,6 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         )}
       </Box>
     </Box>
-
   );
 };
 
