@@ -2177,5 +2177,6 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       </Box>
     );
   }
+}
 
-  export default Customer;
+export default Customer;

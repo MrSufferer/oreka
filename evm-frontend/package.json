@@ -1,6 +1,7 @@
 {
   "name": "oreka-demo-binary-option",
   "version": "0.1.0",
+  "type": "module",
   "description": "Oreka Network Binary Option DApp",
   "author": "zerefwth",
   "private": true,
