@@ -18,7 +18,7 @@ import { PiChartLineUpLight } from "react-icons/pi";
 import { GrInProgress } from "react-icons/gr";
 import { ethers } from 'ethers';
 import { motion, useAnimation } from 'framer-motion';
-import BinaryOptionMarketChainlink from '../contracts/abis/BinaryOptionMarketChainlinkABI.json';
+import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketChainlinkABI.json';
 import { PriceService, PriceData } from '../services/PriceService';
 import { useRouter } from 'next/router';
 import { useAuth } from '../context/AuthContext';
@@ -27,8 +27,8 @@ import MarketCharts from './charts/MarketCharts';
 import { format } from 'date-fns';
 import { formatTimeToLocal, getCurrentTimestamp, getTimeRemaining } from '../utils/timeUtils';
 import { STRIKE_PRICE_MULTIPLIER } from '../utils/constants';
-import { 
-  getTradingPairFromPriceFeed, 
+import {
+  getTradingPairFromPriceFeed,
   getChartSymbolFromTradingPair,
   formatStrikePriceFromContract,
   formatStrikePriceForContract
@@ -80,6 +80,7 @@ export const fetchMarketDetails = async (contract: ethers.Contract) => {
   try {
     const phase = await contract.currentPhase();
     const oracleDetails = await contract.oracleDetails();
+    
     return { phase, oracleDetails };
   } catch (error) {
     console.error("Error fetching market details:", error);
@@ -88,25 +89,18 @@ export const fetchMarketDetails = async (contract: ethers.Contract) => {
 };
 
 /**
- * Provider configuration for Ethereum interaction
- */
-const providerConfig = {
-  chainId: 31337,
-  name: 'local',
-  ensAddress: null,
-  networkId: 31337,
-  polling: false,
-  staticNetwork: true
-};
-
-/**
  * Helper function to get Ethereum provider and signer
  * @returns Object containing provider and signer
  */
 const getProviderAndSigner = async () => {
-  const provider = new ethers.providers.Web3Provider(window.ethereum, providerConfig);
-  await provider.send("eth_requestAccounts", []); // Yêu cầu kết nối ví
+  const provider = new ethers.providers.Web3Provider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
   const signer = provider.getSigner();
+
+  // Log network information for debugging
+  const network = await provider.getNetwork();
+  console.log("Connected to network:", network.name, network.chainId);
+
   return { provider, signer };
 };
 
@@ -217,7 +211,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           const { signer } = await getProviderAndSigner();
           const newContract = new ethers.Contract(
             contractAddress,
-            BinaryOptionMarketChainlink.abi,
+            BinaryOptionMarket.abi,
             signer
           );
           setContract(newContract);
@@ -285,7 +279,6 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     try {
       const [
         positions,
-        strikePrice,
         phase,
         deployTime,
         maturityTime,
@@ -296,10 +289,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         longPosition,
         shortPosition,
         feePercentage,
-        dataFeedAddress  // Get the Chainlink price feed address
+        tradingPair
       ] = await Promise.all([
         contract.positions(),
-        contract.strikePrice(),
         contract.currentPhase(),
         contract.deployTime(),
         contract.maturityTime(),
@@ -310,14 +302,15 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         contract.longBids(walletAddress),
         contract.shortBids(walletAddress),
         contract.feePercentage(),
-        contract.dataFeed()  // Add this line to get the price feed address
+        contract.tradingPair()
       ]);
 
       // Map the price feed address to trading pair
-      const tradingPair = getTradingPairFromPriceFeed(dataFeedAddress);
-      
+      //const tradingPair = contract.tradingPair();
+
       // Save trading pair to state
       setTradingPair(tradingPair);
+      setCurrentPhase(phase);
 
       // Format trading pair for API and save to chartSymbol
       const formattedSymbol = getChartSymbolFromTradingPair(tradingPair);
@@ -345,8 +338,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       }
 
       // Update strikePrice - convert from integer (stored in blockchain) to float
-      const strikePriceInteger = strikePrice.toString();
-      setStrikePrice(formatStrikePriceFromContract(strikePriceInteger, 100000000));
+      //const oracleDetails = await contract.oracleDetails();
+      const strikePriceRaw = oracleDetails.strikePrice;
+      setStrikePrice(formatStrikePriceFromContract(strikePriceRaw, 10 ** 8));
 
       setMaturityTime(maturityTime.toNumber());
       setOracleDetails(oracleDetails);
@@ -593,7 +587,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       }
     }
 
-    setPotentialProfit(potentialReturn.toFixed(4));
+    setPotentialProfit(potentialReturn.toFixed(8));
     setProfitPercentage(profitPercentage);
   }, [positions, feePercentage]);
 
@@ -640,38 +634,46 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     if (!contract || !bidAmount || parseFloat(bidAmount) <= 0) return;
 
     try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
+      const { provider } = await getProviderAndSigner();
+      const network = await provider.getNetwork();
 
-      const bidAmountWei = ethers.utils.parseEther(bidAmount);
+      // Fix options type to allow gasLimit property
+      const options: { value: ethers.BigNumber; gasLimit?: any } = { 
+        value: ethers.utils.parseEther(bidAmount) 
+      };
 
-      // Call bid function of contract with signer
-      const tx = await contractWithSigner.bid(bidSide, {
-        value: bidAmountWei,
-        gasLimit: 500000
-      });
+      if (network.chainId === 1) {
+        // Mainnet
+        options.gasLimit = ethers.utils.hexlify(300000);
+      } else if (network.chainId === 11155111) {
+        // Sepolia
+        options.gasLimit = ethers.utils.hexlify(300000);
+      }
 
+      const side = bidSide === Side.Long ? 0 : 1;
+      const tx = await contract.bid(side, options);
+
+      setIsResolving(true);
       await tx.wait();
+      setIsResolving(false);
 
-      // Update UI after bid success
+      // Refresh data
+      resetBettingForm();
+      fetchMarketDetails();
+
       toast({
-        title: "Bid placed successfully!",
+        title: "Bid Placed Successfully",
         status: "success",
-        duration: 3000,
+        duration: 5000,
         isClosable: true,
       });
-
-      // Reset bid amount and refresh data
-      await refreshBalance();
-      await fetchMarketDetails();
-      resetBettingForm();
-      setBidAmount("");
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error placing bid:", error);
+      setIsResolving(false);
+
       toast({
-        title: "Failed to place bid",
-        description: error.message || "An unexpected error occurred",
+        title: "Error Placing Bid",
+        description: error.message,
         status: "error",
         duration: 5000,
         isClosable: true,
@@ -747,7 +749,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
-      const contract = new ethers.Contract(contractAddress, BinaryOptionMarketChainlink.abi, signer);
+      const contract = new ethers.Contract(contractAddress, BinaryOptionMarket.abi, signer);
 
       const tx = await contract.startBidding();
       await tx.wait();
@@ -800,7 +802,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           console.log('Invalid chart symbol, cannot fetch price history');
           return;
         }
-        
+
         console.log('Fetching price history for symbol:', chartSymbol);
         const priceService = PriceService.getInstance();
         const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
@@ -888,7 +890,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         const provider = new ethers.providers.Web3Provider(window.ethereum);
         const contract = new ethers.Contract(
           contractAddress,
-          BinaryOptionMarketChainlink.abi,
+          BinaryOptionMarket.abi,
           provider
         );
 
@@ -900,13 +902,12 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             phase,
             biddingStartTime,
             maturityTime,
-            oracleDetails,
+            //oracleDetails,
             totalDeposited,
             feePercentage,
             dataFeedAddress  // Get the Chainlink price feed address
           ] = await Promise.all([
             contract.positions(),
-            contract.strikePrice(),
             contract.currentPhase(),
             contract.biddingStartTime(),
             contract.maturityTime(),
@@ -920,9 +921,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           setContract(contract);
           setContractAddress(contractAddress);
           // Get strikePrice
-          const strikePriceInteger = await contract.strikePrice();
-          // Convert from integer (BigNumber) to float for display
-          const strikePriceFormatted = (parseInt(strikePriceInteger.toString()) / STRIKE_PRICE_MULTIPLIER).toFixed(2);
+          const oracleDetails = await contract.oracleDetails();
+          const strikePriceRaw = oracleDetails.strikePrice;
+          const strikePriceFormatted = (parseInt(strikePriceRaw.toString()) / 10**8).toFixed(2);
           setStrikePrice(strikePriceFormatted);
           setCurrentPhase(phase);
           setMaturityTime(maturityTime.toNumber());
@@ -932,7 +933,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
 
           // Map the price feed address to trading pair
           const tradingPair = getTradingPairFromPriceFeed(dataFeedAddress);
-          
+
           // Save trading pair to state
           setTradingPair(tradingPair);
 
@@ -958,7 +959,6 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       }
     };
 
-    loadContractData();
   }, []);
 
   // Add near other state declarations
@@ -1434,10 +1434,10 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           tradingPairResult,
           currentPhaseResult,
           biddingStartTimeResult,
-          feePercentageResult,
+          //feePercentageResult,
           positionsResult
         ] = await Promise.all([
-          contract.strikePrice(),
+          contract.oracleDetails(),
           contract.maturityTime(),
           contract.tradingPair(),
           contract.currentPhase(),
@@ -1452,6 +1452,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         const tradingPair = tradingPairResult;
         const currentPhase = currentPhaseResult;
         const biddingStartTime = biddingStartTimeResult.toNumber();
+        const feePercentageResult = await contract.feePercentage();
         const feePercentage = feePercentageResult.toNumber();
 
         // update state
@@ -1596,7 +1597,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                   <HStack color="gray.400">
                     <PiChartLineUpLight />
                     <Text color="gray.400" fontSize="sm">
-                      {totalDeposited.toFixed(2)} ETH |
+                      {totalDeposited.toFixed(8)} ETH |
                     </Text>
                   </HStack>
                   <HStack color="gray.400">
@@ -1968,7 +1969,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
               <Text color="gray.400" fontSize="lg">
                 Pot. profit:
               </Text>
-              <Text color={profitPercentage > 0 ? "green.400" : "gray.400"} fontSize="lg">
+              <Text color={profitPercentage > 0 ? "green.400" : "gray.400"} fontSize="15px">
                 {potentialProfit} {profitPercentage !== 0 ? `(${profitPercentage > 0 ? '+' : ''}${profitPercentage.toFixed(2)}%)` : ''} ETH
               </Text>
             </Flex>
@@ -1977,11 +1978,11 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             <Text fontSize="lg" fontWeight="bold" mb={3} color="#FEDF56">Your Position</Text>
             <Flex justify="space-between" mb={2}>
               <Text color="green.400">LONG:</Text>
-              <Text color="white">{userPositions.long.toFixed(4)} ETH</Text>
+              <Text color="white">{userPositions.long.toFixed(8)} ETH</Text>
             </Flex>
             <Flex justify="space-between">
               <Text color="red.400">SHORT:</Text>
-              <Text color="white">{userPositions.short.toFixed(4)} ETH</Text>
+              <Text color="white">{userPositions.short.toFixed(8)} ETH</Text>
             </Flex>
           </Box>
           <Box p={4} borderRadius="xl" mb={4} borderWidth={1} borderColor="gray.700">

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
-import { Box, Button, HStack, Icon, Text, VStack, SimpleGrid, Flex, Input, Select, Divider, Progress, InputGroup, InputRightAddon, Spinner, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Tooltip, Spacer, Image, useColorModeValue, Heading, Badge } from '@chakra-ui/react';
-import { ChevronRightIcon, InfoIcon } from '@chakra-ui/icons';
+import { Box, Button, HStack, Icon, Text, VStack, SimpleGrid, Flex, Input, Select, Divider, Progress, InputGroup, InputRightAddon, Spinner, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Tooltip, Spacer, Image } from '@chakra-ui/react';
 
 import { FaCalendarDay, FaPlayCircle, FaClock, FaCheckCircle, FaListAlt, FaRegClock } from 'react-icons/fa'; // Import các biểu tượng
 import { IoWalletOutline } from "react-icons/io5";
@@ -18,7 +17,6 @@ import { useAuth } from '../context/AuthContext';
 import { PriceService } from '../services/PriceService';
 import { format, formatDistanceToNow } from 'date-fns';
 import { getCurrentTimestamp, isTimestampPassed, getTimeRemaining } from '../utils/timeUtils';
-import { STRIKE_PRICE_MULTIPLIER } from '../utils/constants';
 
 interface ListAddressOwnerProps {
   ownerAddress: string;
@@ -32,108 +30,15 @@ interface ContractData {
   longAmount: string;
   shortAmount: string;
   strikePrice: string;
-  strikePriceFormatted: string;
   phase: number;
-  maturityTime: number;
-  priceFeedAddress: string;
+  maturityTime: string;
   tradingPair: string;
   owner: string;
   indexBg: string;
-  isOwner: boolean;
-  totalVolume?: number;
 }
 
 enum Phase { Trading, Bidding, Maturity, Expiry }
 
-// Update the price feed mapping with additional addresses and improve case handling
-const PRICE_FEED_MAPPING = {
-  // Sepolia Testnet price feeds (lowercase for consistent comparison)
-  "0x1b44f3514812d835eb1bdb0acb33d3fa3351ee43": "BTC/USD", // Sepolia
-  "0x694aa1769357215de4fac081bf1f309adc325306": "ETH/USD", // Sepolia
-  "0x0715a7794a1dc8e42615f059dd6e406a6594651a": "ETH/USD", // Sepolia alternative
-  "0x8a6af2b75f23831adc973ce6288e5329f63d86c6": "USD/JPY", // Sepolia
-  "0x1a81afb8146aefcfc5e50e8479e826e7de55b910": "EUR/USD", // Sepolia
-  "0x91fab41f5f3be955963a986366edacff1aaeaa83": "GBP/USD", // Sepolia
-  
-  // Goerli
-  "0xa39434a63a52e749f02807ae27335515ba4b07f7": "BTC/USD", 
-  "0xd4a33860578de61dbabdc8bfdb98fd742fa7028e": "ETH/USD",
-  
-  // Mainnet
-  "0xf4030086522a5beea4988f8ca5b36dbc97bee88c": "BTC/USD",
-  "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419": "ETH/USD",
-  
-  // If you have other networks, add them here
-};
-
-// Mapping từ trading pair sang indexBg (để xác định background)
-const TRADING_PAIR_TO_BG = {
-  "BTC/USD": "1",
-  "ETH/USD": "2",
-  "EUR/USD": "3",
-  "USD/JPY": "4",
-  "GBP/USD": "5",
-  "DAI/USD": "6",
-  "LINK/USD": "7",
-  "Unknown": "8" // Default background
-};
-
-// Improve the trading pair resolution with better address handling
-const getTradingPairFromPriceFeed = (priceFeedAddress) => {
-  if (!priceFeedAddress || priceFeedAddress === "Unknown") return "BTC/USD"; // Default to BTC/USD for demo
-  
-  try {
-    // Normalize and lowercase the address for consistent comparison
-    const normalizedAddress = priceFeedAddress.toLowerCase();
-    console.log("Normalized address for lookup:", normalizedAddress);
-    
-    // Try direct lookup first
-    if (PRICE_FEED_MAPPING[normalizedAddress]) {
-      console.log(`Found trading pair: ${PRICE_FEED_MAPPING[normalizedAddress]}`);
-      return PRICE_FEED_MAPPING[normalizedAddress];
-    }
-    
-    // If not found, try to check if any partial match exists (for contract proxies)
-    for (const [mappedAddress, tradingPair] of Object.entries(PRICE_FEED_MAPPING)) {
-      if (normalizedAddress.includes(mappedAddress.slice(2, 10))) {
-        console.log(`Found trading pair by partial match: ${tradingPair}`);
-        return tradingPair;
-      }
-    }
-    
-    console.log("No trading pair found for address");
-    return "BTC/USD"; // Default for better UX in demo
-  } catch (error) {
-    console.error("Error processing price feed address:", error);
-    return "BTC/USD"; // Default for better UX in demo
-  }
-};
-
-// Lấy indexBg từ trading pair
-const getIndexBgFromTradingPair = (tradingPair) => {
-  return TRADING_PAIR_TO_BG[tradingPair] || "8"; // Default to 8 if unknown
-};
-
-// Fix the formatStrikePriceFromContract function to handle BigNumber properly
-const formatStrikePriceFromContract = (strikePriceBN) => {
-  if (!strikePriceBN) return "0.00";
-  
-  try {
-    // Convert to string first for safer parsing
-    const strikePriceStr = strikePriceBN.toString();
-    console.log("Raw strike price string:", strikePriceStr);
-    
-    // Parse as a number and apply divisor (STRIKE_PRICE_MULTIPLIER or 10^8)
-    const strikePriceNum = parseFloat(strikePriceStr);
-    const formattedPrice = (strikePriceNum / 100000000).toFixed(2);
-    
-    console.log("Formatted strike price:", formattedPrice);
-    return formattedPrice;
-  } catch (error) {
-    console.error("Error formatting strike price:", error);
-    return "0.00";
-  }
-};
 
 // function to get color for phase
 const getPhaseColor = (phase: number) => {
@@ -169,26 +74,46 @@ const getPhaseName = (phase: number) => {
 
 
 
-// Update the getMarketTitle function to format values properly
+// update getMarketTitle to format strikePrice correctly
 const getMarketTitle = (contract) => {
   try {
+    // Format trading pair
+    const pair = contract.tradingPair.replace('/', '-');
+
     // Format maturity time
     const timestamp = Number(contract.maturityTime);
-    if (isNaN(timestamp) || timestamp === 0) {
-      return `${contract.tradingPair || 'Unknown'} Market`;
-    }
+    if (isNaN(timestamp) || timestamp === 0) return `${pair} Market`;
 
     const date = new Date(timestamp * 1000);
     const maturityTimeFormatted = format(date, 'MMM d, yyyy h:mm a');
 
-    // Get trading pair display 
-    let pairDisplay = contract.tradingPair || 'Unknown';
+    // convert strikePrice from integer to float
+    // The contract stores prices as integers with 8 decimal places (10^8 multiplier)
+    let strikePriceInteger;
+    try {
+      strikePriceInteger = ethers.BigNumber.from(contract.strikePrice);
+    } catch (e) {
+      // Fallback to parseInt if BigNumber parsing fails
+      strikePriceInteger = parseInt(contract.strikePrice);
+    }
     
-    // Format strike price - use preformatted value or format it now
-    let priceDisplay = contract.strikePriceFormatted || formatStrikePriceFromContract(contract.strikePrice);
-    
-    // Build the market title with properly formatted values
-    return `${pairDisplay} will reach $${priceDisplay} by ${maturityTimeFormatted} ?`;
+    // Format with appropriate decimal places based on the trading pair
+    let strikePriceFormatted;
+    if (pair.includes('BTC') || pair.includes('ETH')) {
+      // More decimal places for higher-value assets
+      strikePriceFormatted = (strikePriceInteger / 10**8).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    } else {
+      // Standard formatting for other assets
+      strikePriceFormatted = (strikePriceInteger / 10**8).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 4
+      });
+    }
+
+    return `${pair} will reach $${strikePriceFormatted} by ${maturityTimeFormatted} ?`;
   } catch (error) {
     console.error("Error getting market title:", error);
     return "Unknown Market";
@@ -303,41 +228,91 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     fetchDeployedContracts();
   }, [ownerAddress, page]);
 
+  // Add a network-aware price feed mapping for the formatStrikePriceFromContract function
+  const NETWORK_PRICE_FEED_MAPPING = {
+    // Mainnet 
+    1: {
+      "0xf4030086522a5beea4988f8ca5b36dbc97bee88c": "BTC/USD",
+      "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419": "ETH/USD",
+      // Add more mainnet addresses
+    },
+    // Sepolia
+    11155111: {
+      "0x1b44f3514812d835eb1bdb0acb33d3fa3351ee43": "BTC/USD",
+      "0x694aa1769357215de4fac081bf1f309adc325306": "ETH/USD",
+      "0x0715a7794a1dc8e42615f059dd6e406a6594651a": "ETH/USD",
+      "0x8a6af2b75f23831adc973ce6288e5329f63d86c6": "USD/JPY",
+      // Add more Sepolia addresses
+    },
+    // Goerli
+    5: {
+      "0xa39434a63a52e749f02807ae27335515ba4b07f7": "BTC/USD",
+      "0xd4a33860578de61dbabdc8bfdb98fd742fa7028e": "ETH/USD",
+      // Add more Goerli addresses
+    },
+    // Local/Anvil (for testing)
+    31337: {
+      // Local addresses
+    }
+  };
+
   /**
    * Fetches all deployed contracts from the blockchain
    * Retrieves contracts from known owners and falls back to event logs if needed
    */
   const fetchDeployedContracts = async () => {
-    setLoading(true);
-    console.log("Fetching deployed contracts...");
-    
     try {
-      if (!ownerAddress) {
-        setLoading(false);
-        return;
+      setLoading(true);
+      
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const network = await provider.getNetwork();
+      console.log("Current network:", network.name, network.chainId);
+      
+      // Use network-specific factory address if necessary
+      let factoryAddress = FACTORY_ADDRESS;
+      console.log("Using factory address:", factoryAddress);
+      
+      const factoryContract = new ethers.Contract(factoryAddress, Factory.abi, provider);
+      
+      console.log("Fetching all contracts from all known owners");
+
+      // List of known wallet addresses to check for contracts
+      // Can be expanded with additional addresses as the platform grows
+      const knownOwners = [
+        "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", // Default Hardhat account #0
+        "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", // Default Hardhat account #1
+        "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", // Default Hardhat account #2
+        // Additional known addresses can be added here
+      ];
+
+      // Add current user's address and requested owner address to the lookup list
+      if (walletAddress && !knownOwners.includes(walletAddress)) {
+        knownOwners.push(walletAddress);
+      }
+      if (ownerAddress && !knownOwners.includes(ownerAddress)) {
+        knownOwners.push(ownerAddress);
       }
 
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const factoryContract = new ethers.Contract(FactoryAddress, Factory.abi, provider);
-      
-      // First, try to get contracts from owner's list
+      console.log("Known owners:", knownOwners);
+
+      // Retrieve all contracts from all known owner addresses
       let allContracts: string[] = [];
-      
-      if (ownerAddress) {
+
+      for (const owner of knownOwners) {
         try {
-          console.log(`Fetching contracts for owner ${ownerAddress}`);
-          const contractCount = await factoryContract.getContractCountByOwner(ownerAddress);
-          console.log(`Owner ${ownerAddress} has ${contractCount} contracts`);
-          
-          for (let i = 0; i < contractCount; i++) {
-            const contractAddress = await factoryContract.getContractByOwnerAndIndex(ownerAddress, i);
-            if (contractAddress && !allContracts.includes(contractAddress)) {
-              console.log(`Found contract ${contractAddress} for owner ${ownerAddress}`);
-              allContracts.push(contractAddress);
-            }
+          if (owner && owner !== "") {
+            const ownerContracts = await factoryContract.getContractsByOwner(owner);
+            console.log(`Contracts for owner ${owner}:`, ownerContracts);
+
+            // Add new contracts to the list (avoiding duplicates)
+            ownerContracts.forEach((contract: string) => {
+              if (!allContracts.includes(contract)) {
+                allContracts.push(contract);
+              }
+            });
           }
         } catch (err) {
-          console.error(`Error fetching contracts for owner ${ownerAddress}:`, err);
+          console.error(`Error fetching contracts for owner ${owner}:`, err);
         }
       }
 
@@ -371,162 +346,71 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         const contract = new ethers.Contract(address, BinaryOptionMarket.abi, provider);
 
         try {
-          console.log(`Getting data for contract at ${address}`);
-          
-          // Call each method individually with proper error handling
-          let positions;
-          try {
-            positions = await contract.positions();
-            console.log(`Positions for ${address}:`, positions);
-          } catch (err) {
-            console.error(`Error getting positions for ${address}:`, err);
-            positions = { long: ethers.BigNumber.from(0), short: ethers.BigNumber.from(0) };
-          }
-          
-          // Improve strikePrice retrieval - try multiple methods
-          let strikePriceBN;
-          try {
-            // First try direct method
-            strikePriceBN = await contract.strikePrice();
-            console.log(`Direct strike price for ${address}:`, strikePriceBN.toString());
-            
-            // If it's 0, try getting it from oracleDetails
-            if (strikePriceBN.toString() === "0") {
-              const oracleDetails = await contract.oracleDetails();
-              if (oracleDetails && oracleDetails.strikePrice) {
-                strikePriceBN = oracleDetails.strikePrice;
-                console.log(`Oracle strike price for ${address}:`, strikePriceBN.toString());
-              }
-            }
-          } catch (err) {
-            console.error(`Error getting strikePrice for ${address}:`, err);
-            strikePriceBN = ethers.BigNumber.from(0);
-          }
-          
-          let phase;
-          try {
-            phase = await contract.currentPhase();
-            console.log(`Phase for ${address}:`, phase);
-          } catch (err) {
-            console.error(`Error getting currentPhase for ${address}:`, err);
-            phase = 0;
-          }
-          
-          let maturityTimeBN;
-          try {
-            maturityTimeBN = await contract.maturityTime();
-            console.log(`Maturity time for ${address}:`, maturityTimeBN.toString());
-          } catch (err) {
-            console.error(`Error getting maturityTime for ${address}:`, err);
-            maturityTimeBN = ethers.BigNumber.from(0);
-          }
-          
-          let dataFeedAddress;
-          try {
-            // Try multiple methods to get the price feed address
-            try {
-              dataFeedAddress = await contract.dataFeed();
-              console.log(`Data feed from dataFeed() for ${address}:`, dataFeedAddress);
-            } catch (innerErr) {
-              console.log("dataFeed() failed, trying priceFeed()");
-              try {
-                dataFeedAddress = await contract.priceFeed();
-                console.log(`Data feed from priceFeed() for ${address}:`, dataFeedAddress);
-              } catch (innerErr2) {
-                console.log("All price feed methods failed");
-                dataFeedAddress = "Unknown";
-              }
-            }
-          } catch (err) {
-            console.error(`Error getting price feed for ${address}:`, err);
-            dataFeedAddress = "Unknown";
-          }
-          
-          let ownerAddress;
-          try {
-            ownerAddress = await contract.owner();
-            console.log(`Owner for ${address}:`, ownerAddress);
-          } catch (err) {
-            console.error(`Error getting owner for ${address}:`, err);
-            ownerAddress = ethers.constants.AddressZero;
-          }
-          
+          // Get basic data from contract
+          const [
+            positions,
+            oracleDetails,
+            phase,
+            maturityTimeBN,
+            tradingPair,
+            owner
+          ] = await Promise.all([
+            contract.positions(),
+            contract.oracleDetails(),
+            contract.currentPhase(),
+            contract.maturityTime(),
+            contract.tradingPair().catch(() => 'Unknown'),
+            contract.owner()
+          ]);
+
+          const strikePriceBN = oracleDetails.strikePrice;
+
           // Handle background index separately
-          let indexBgValue = 1; // Default value
+          let indexBgValue = 1; // Default random value
           try {
             const indexBgResult = await contract.indexBg();
             indexBgValue = indexBgResult.toNumber ? indexBgResult.toNumber() : parseInt(indexBgResult.toString());
             console.log(`Contract ${address} has indexBg: ${indexBgValue}`);
           } catch (error) {
-            console.log(`Error getting indexBg for contract ${address}, using default: 1`);
+            console.log(`Error getting indexBg for contract ${address}, using random: ${indexBgValue}`);
           }
 
           // Convert maturityTime from BigNumber to number
           let maturityTimeValue;
           if (maturityTimeBN && typeof maturityTimeBN.toNumber === 'function') {
             maturityTimeValue = maturityTimeBN.toNumber();
+            console.log("Converted maturityTime from BigNumber:", maturityTimeValue);
           } else if (typeof maturityTimeBN === 'string') {
             maturityTimeValue = parseInt(maturityTimeBN);
+            console.log("Converted maturityTime from string:", maturityTimeValue);
           } else {
-            maturityTimeValue = 0;
+            maturityTimeValue = maturityTimeBN;
+            console.log("Using maturityTime as is:", maturityTimeValue);
           }
 
-          // Get tradingPair from priceFeedAddress - ensure it works
-          console.log("Getting trading pair from price feed:", dataFeedAddress);
-          const tradingPair = getTradingPairFromPriceFeed(dataFeedAddress);
-          console.log("Resolved trading pair:", tradingPair);
-          
-          // Format strike price from contract format to display format
-          console.log("Formatting strike price:", strikePriceBN.toString());
-          const strikePrice = strikePriceBN.toString();
-          let strikePriceFormatted = formatStrikePriceFromContract(strikePriceBN);
-          console.log("Formatted strike price:", strikePriceFormatted);
-
-          // Special case for contracts with 0 strike price - use a placeholder
-          if (strikePriceFormatted === "0.00") {
-            console.log(`Using default/fallback strike price for ${address}`);
-            
-            // Try to get from previous contract data if it exists
-            const savedContractData = JSON.parse(localStorage.getItem('contractData') || '{}');
-            if (savedContractData.address === address && isValidContractValue(savedContractData.strikePriceFormatted)) {
-              strikePriceFormatted = savedContractData.strikePriceFormatted;
-              console.log(`Using saved strike price: ${strikePriceFormatted}`);
-            } else {
-              // Use a default value for demo purposes
-              strikePriceFormatted = "10000.00";
-            }
+          // Check for valid maturityTime
+          if (!maturityTimeValue || isNaN(maturityTimeValue) || maturityTimeValue <= 0) {
+            console.log("Invalid maturityTime, using current time + 1 day as fallback");
+            maturityTimeValue = Math.floor(Date.now() / 1000) + 86400; // Current time + 1 day
           }
 
-          // Calculate total volume
-          const longAmount = ethers.utils.formatEther(positions.long);
-          const shortAmount = ethers.utils.formatEther(positions.short);
-          const totalVolume = parseFloat(longAmount) + parseFloat(shortAmount);
-
-          console.log(`Processed data for ${address}:`, {
-            tradingPair,
-            strikePriceFormatted,
-            maturityTimeValue,
-            phase,
-            longAmount,
-            shortAmount,
-            totalVolume
-          });
+          // Diagnostic logging for maturity time validation
+          const maturityDate = new Date(maturityTimeValue * 1000);
+          console.log("Maturity date:", maturityDate.toISOString());
+          console.log("Current time:", new Date().toISOString());
+          console.log("Is maturity in the past?", maturityDate <= new Date());
 
           return {
             address,
             createDate: new Date().toISOString(),
-            longAmount,
-            shortAmount,
-            strikePrice,
-            strikePriceFormatted,
-            phase: Number(phase),
+            longAmount: ethers.utils.formatEther(positions.long),
+            shortAmount: ethers.utils.formatEther(positions.short),
+            strikePrice: strikePriceBN.toString(),
+            phase: phase.toString(),
             maturityTime: maturityTimeValue,
-            priceFeedAddress: dataFeedAddress,
             tradingPair,
-            owner: ownerAddress,
-            indexBg: indexBgValue.toString(),
-            isOwner: ownerAddress.toLowerCase() === walletAddress?.toLowerCase(),
-            totalVolume
+            owner,
+            indexBg: indexBgValue.toString()
           };
         } catch (error) {
           console.error(`Error fetching data for contract ${address}:`, error);
@@ -536,20 +420,15 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             longAmount: '0',
             shortAmount: '0',
             strikePrice: '0',
-            strikePriceFormatted: '0',
-            phase: 0,
+            phase: '0',
             maturityTime: 0,
-            priceFeedAddress: 'Unknown',
             tradingPair: 'Unknown',
-            owner: ethers.constants.AddressZero,
-            indexBg: '1',
-            isOwner: false,
-            totalVolume: 0
+            owner: '',
+            indexBg: '1'
           };
         }
       }));
 
-      console.log("Processed contract data:", contractsData);
       setDeployedContracts(contractsData);
       setLoading(false);
     } catch (error) {
@@ -615,32 +494,36 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
  * @param {ContractData} contractData - Full contract data object
  */
   const handleAddressClick = (contractAddress: string, owner: string, contractData: ContractData) => {
-    // Store complete data in localStorage including tradingPair and strikePriceFormatted
-    localStorage.setItem('contractData', JSON.stringify({
-      address: contractAddress,
-      strikePrice: contractData.strikePrice,
-      strikePriceFormatted: contractData.strikePriceFormatted,
-      maturityTime: contractData.maturityTime,
-      tradingPair: contractData.tradingPair,
-      phase: contractData.phase,
-      longAmount: contractData.longAmount,
-      shortAmount: contractData.shortAmount,
-      priceFeedAddress: contractData.priceFeedAddress || "Unknown"
-    }));
+    // Store contract address in localStorage for persistence across page navigations
+    localStorage.setItem('selectedContractAddress', contractAddress);
 
-    // Navigate to the customer view
-    router.push('/customer');
+    // Store additional contract data for Customer.tsx to use immediately
+    localStorage.removeItem('contractData');
+    // localStorage.setItem('contractData', JSON.stringify({
+    //   address: contractAddress,
+    //   strikePrice: contractData.strikePrice,
+    //   maturityTime: contractData.maturityTime,
+    //   tradingPair: contractData.tradingPair,
+    //   phase: contractData.phase,
+    //   longAmount: contractData.longAmount,
+    //   shortAmount: contractData.shortAmount,
+    //   owner: contractData.owner,
+    //   timestamp: Date.now()
+    // }));
+
+    // Always navigate to the customer view for the contract
+    router.push(`/customer/${contractAddress}`);
 
     // Show warning toast if user is not the contract owner
-    if (isConnected && walletAddress.toLowerCase() !== owner.toLowerCase()) {
-      toast({
-        title: "Access restricted",
-        description: "You are not the owner of this contract. Redirecting to market view.",
-        status: "warning",
-        duration: 5000,
-        isClosable: true,
-      });
-    }
+    // if (isConnected && walletAddress.toLowerCase() !== owner.toLowerCase()) {
+    //   toast({
+    //     title: "Access restricted",
+    //     description: "You are not the owner of this contract. Redirecting to market view.",
+    //     status: "warning",
+    //     duration: 5000,
+    //     isClosable: true,
+    //   });
+    // }
   };
 
   /**
@@ -729,12 +612,21 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     currentContracts.forEach(contract => {
       if (!contract) return;
 
-      // Read indexBg from contract and convert to number
-      const bgIndex = contract.indexBg ?
-        Math.min(Math.max(parseInt(contract.indexBg), 1), 10) :
-        1;
+      // Get indexBg from contract data
+      let bgIndex: number;
 
-      console.log(`Contract ${contract.address} using background index: ${bgIndex}`);
+      if (contract.indexBg && contract.indexBg !== '0') {
+        // Use indexBg from contract
+        bgIndex = parseInt(contract.indexBg);
+        console.log(`Contract ${contract.address} has indexBg from contract: ${bgIndex}`);
+      } else {
+        // Generate a random indexBg if not available
+        bgIndex = 1; // Random value between 1-10
+        console.log(`Contract ${contract.address} using generated indexBg: ${bgIndex}`);
+      }
+
+      // Ensure value is between 1-10
+      bgIndex = Math.min(Math.max(bgIndex, 1), 10);
       newImageIndices[contract.address] = bgIndex;
     });
 
@@ -786,7 +678,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         [displaySymbol]: priceData.price
       }));
 
-      console.log(`Updated price for ${displaySymbol}: $${priceData.price}`);
+      //console.log(`Updated price for ${displaySymbol}: $${priceData.price}`);
     }, tradingPairs);
 
     // Load initial prices directly
@@ -840,12 +732,21 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     setContractPercentages(newPercentages);
   }, [currentContracts]);
 
-  // Add a helper function to check if a contract value is valid
-  const isValidContractValue = (value) => {
-    if (!value) return false;
-    if (value === "0" || value === 0) return false;
-    return true;
-  };
+  const [marketTitles, setMarketTitles] = useState({});
+
+  useEffect(() => {
+    const fetchTitles = async () => {
+      const titles = {};
+      for (const contract of deployedContracts) {
+        titles[contract.address] = await getMarketTitle(contract);
+      }
+      setMarketTitles(titles);
+    };
+    
+    if (deployedContracts.length > 0) {
+      fetchTitles();
+    }
+  }, [deployedContracts]);
 
   return (
     <Box bg="white" minH="100vh">
@@ -885,7 +786,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                 {parseFloat(balance).toFixed(4)} ETH
               </Text>
             </HStack>
-{/* Connected wallet address (shortened) */}
+            {/* Connected wallet address (shortened) */}
             <Button
               leftIcon={<FaWallet />}
               colorScheme="blue"
@@ -964,7 +865,8 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             spacing={4}
             width="100%"
           >
-            {filteredContracts.map((contract, index) => (
+            {filteredContracts.map(({ address, createDate, longAmount, shortAmount, phase, maturityTime, tradingPair, owner }, index) => (
+
               <Box
                 key={index}
                 p="2px"
@@ -973,13 +875,25 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                 transition="transform 0.2s"
                 _hover={{ transform: 'translateY(-4px)' }}
                 cursor="pointer"
-                onClick={() => handleAddressClick(contract.address, contract.owner, contract)}
               >
                 <Box
                   borderRadius="md"
                   overflow="hidden"
                   boxShadow="md"
                   bg="#1A202C"
+                  onClick={() =>
+                    handleAddressClick(address, owner, {
+                      address,
+                      createDate,
+                      longAmount,
+                      shortAmount,
+                      phase,
+                      maturityTime,
+                      tradingPair,
+                      owner,
+                      indexBg: contractImageIndices[address] ? contractImageIndices[address].toString() : '1'
+                    })
+                  }
                 >
                   {/* Image section - use fixed random number from state */}
                   <Box
@@ -991,11 +905,11 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     bg="#151A23"
                     p={1}
                     position="relative"
+
                   >
                     <Image
-                      //src={`/images/${tradingPair.split('/')[0].toLowerCase()}/${tradingPair.split('/')[0].toLowerCase()}${contractImageIndices[address] || 1}.png`}
-                      src={`/images/btc/btc1.png`}
-                      //alt={tradingPair}
+                      src={`/images/${tradingPair.split('/')[0].toLowerCase()}/${tradingPair.split('/')[0].toLowerCase()}${contractImageIndices[address] || 1}.png`}
+                      alt={tradingPair}
                       w="100%"
                       h="100%"
                       objectFit="cover"
@@ -1004,7 +918,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     />
                     <Box
                       display="inline-block"
-                      bg={getPhaseColor(parseInt(contract.phase))}
+                      bg={getPhaseColor(parseInt(phase))}
                       color="white"
                       px={3}
                       py={1}
@@ -1016,7 +930,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                       bottom="3px"
                       left="7px"
                     >
-                      {getPhaseName(parseInt(contract.phase))}
+                      {getPhaseName(parseInt(phase))}
                     </Box>
                   </Box>
 
@@ -1026,9 +940,9 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
 
                     {/* Market title - Giảm margin bottom */}
-                    <Text fontWeight="bold" mb={1} color="white" fontSize="xl">
-                      {cleanupMarketTitle(getMarketTitle(contract))}
-                    </Text>
+                    <Box fontSize="xl" fontWeight="semibold" color="white" mb={2}>
+                      {marketTitles[address] || "Loading..."}
+                    </Box>
 
 
                     {/* LONG/SHORT ratio */}
@@ -1047,7 +961,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     >
                       {/* LONG Section */}
                       <Box
-                        width={`${contractPercentages[contract.address]?.long}%`}
+                        width={`${contractPercentages[address]?.long}%`}
                         bgGradient="linear(to-r, #0f0c29, #00ff87)"
                         transition="width 0.6s ease"
                         h="full"
@@ -1058,13 +972,13 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                         position="relative"
                         zIndex={1}
                       >
-                        {contractPercentages[contract.address]?.long > 8 && (
+                        {contractPercentages[address]?.long > 8 && (
                           <Text
                             fontSize="sm"
                             fontWeight="bold"
                             color="whiteAlpha.800"
                           >
-                            {contractPercentages[contract.address]?.long.toFixed(0)}%
+                            {contractPercentages[address]?.long.toFixed(0)}%
                           </Text>
                         )}
                       </Box>
@@ -1075,7 +989,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                         right="0"
                         top="0"
                         h="100%"
-                        width={`${contractPercentages[contract.address]?.short}%`}
+                        width={`${contractPercentages[address]?.short}%`}
                         bgGradient="linear(to-r, #ff512f, #dd2476)"
                         transition="width 0.6s ease"
                         display="flex"
@@ -1084,13 +998,13 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                         pl={3}
                         zIndex={0}
                       >
-                        {contractPercentages[contract.address]?.short > 8 && (
+                        {contractPercentages[address]?.short > 8 && (
                           <Text
                             fontSize="sm"
                             fontWeight="bold"
                             color="whiteAlpha.800"
                           >
-                            {contractPercentages[contract.address]?.short.toFixed(0)}%
+                            {contractPercentages[address]?.short.toFixed(0)}%
                           </Text>
                         )}
                       </Box>
@@ -1145,28 +1059,28 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
                     <Flex justify="space-between" align="center">
                       <HStack spacing={2}>
-                        {/* <Icon
+                        <Icon
                           as={
                             tradingPair.includes("BTC")
                               ? SiBitcoinsv
                               : tradingPair.includes("ETH")
                                 ? FaEthereum
-                              : GoInfinity
+                                : GoInfinity
                           }
                           color="blue.300"
-                        /> */}
-                        {/* <Text fontWeight="bold" fontSize="lg" color="white">
+                        />
+                        <Text fontWeight="bold" fontSize="lg" color="white">
                           {assetPrices[tradingPair]
                             ? `$${assetPrices[tradingPair].toLocaleString(undefined, {
                               maximumFractionDigits: 2,
                             })}`
                             : "Loading..."}
-                        </Text> */}
+                        </Text>
                       </HStack>
                       <HStack>
                         <Icon as={FaRegClock} color="gray.400" />
                         <Text fontSize="sm" color="gray.400" textAlign="right">
-                          {renderTimeRemaining(contract.address)}
+                          {renderTimeRemaining(address)}
                         </Text>
                       </HStack>
                     </Flex>
@@ -1180,7 +1094,6 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         )}
       </Box>
     </Box>
-
   );
 };
 

@@ -67,6 +67,8 @@ contract BinaryOptionMarket is Ownable {
     bool public resolved;
     Phase public currentPhase;
     uint public feePercentage;
+    string public tradingPair;
+    uint public indexBg;
 
     mapping(address => uint) public longBids;
     mapping(address => uint) public shortBids;
@@ -88,18 +90,23 @@ contract BinaryOptionMarket is Ownable {
     constructor(
         int _strikePrice,
         address _owner,
+        string memory _tradingPair,
         address _priceFeedAddress,
         uint _maturityTime,
-        uint _feePercentage
+        uint _feePercentage,
+        uint _indexBg
     ) Ownable(_owner) {
 
         require(_maturityTime > block.timestamp, "Maturity time must be in the future");
         require(_feePercentage >= 1 && _feePercentage <= 200, "Fee must be between 0.1% and 20%");
+        require(_indexBg >= 1 && _indexBg <= 10, "Index background must be between 1 and 10");
 
         oracleDetails = OracleDetails(_strikePrice, _strikePrice);
+        tradingPair = _tradingPair;
         maturityTime = _maturityTime;
         deployTime = block.timestamp;
         feePercentage = _feePercentage;
+        indexBg = _indexBg;
 
         dataFeed = AggregatorV3Interface(_priceFeedAddress);
         priceDecimals = dataFeed.decimals();
@@ -111,8 +118,7 @@ contract BinaryOptionMarket is Ownable {
     function bid(Side side) public payable {
         require(currentPhase == Phase.Bidding, "Not in bidding phase");
         require(msg.value > 0, "Value must be greater than zero");
-        require(block.timestamp < resolveTime, "Maturity time has passed");
-
+        
         if (side == Side.Long) {
             positions.long += msg.value;
             longBids[msg.sender] += msg.value;
