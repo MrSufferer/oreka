@@ -1,49 +1,43 @@
+/**
+ * Customer Component
+ * 
+ * This component represents the main customer interface for the binary options market.
+ * It allows users to view market details, place bids, track positions, and claim rewards.
+ * The component manages the entire lifecycle of market participation from the customer perspective.
+ */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useCallback } from 'react'; // Thêm import useCallback
+import { useCallback } from 'react';
 import {
   Flex, Box, Text, Button, VStack, useToast, Input, Heading, Image,
-  Select, HStack, Icon, ScaleFade, Table, Thead, Tbody, Tab, Tr, Th, Td, Spacer, Tabs, TabList, TabPanels, TabPanel, Circle, FormControl, FormLabel,
-  Link
+  HStack, Icon, Tab, Spacer, Tabs, TabList, TabPanels, TabPanel, Circle, FormControl, FormLabel,
+  Link, Skeleton, UnorderedList, ListItem
 } from '@chakra-ui/react';
-import { FaEthereum, FaWallet, FaTrophy, FaChevronLeft, FaShare, FaArrowUp, FaArrowDown, FaExternalLinkAlt, FaBalanceScale, FaCoins, FaChevronRight, FaCalendarAlt, FaRegClock, } from 'react-icons/fa';
+import { ChevronDownIcon, ChevronUpIcon } from '@chakra-ui/icons';
+import { FaWallet, FaChevronLeft, FaArrowUp, FaArrowDown, FaCoins, FaChevronRight, FaRegClock } from 'react-icons/fa';
 import { PiChartLineUpLight } from "react-icons/pi";
 import { GrInProgress } from "react-icons/gr";
 import { ethers } from 'ethers';
-import { BigNumber } from 'ethers';
 import { motion, useAnimation } from 'framer-motion';
 import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketABI.json';
 import { PriceService, PriceData } from '../services/PriceService';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { SiBitcoinsv } from 'react-icons/si';
-import { useRouter } from 'next/router'; // Thêm import này
-import { getContractTradingPair, getChartSymbol } from '../config/tradingPairs';
+import { useRouter } from 'next/router';
 import { useAuth } from '../context/AuthContext';
 import MarketCharts from './charts/MarketCharts';
-import { toZonedTime } from 'date-fns-tz';
+
 import { format } from 'date-fns';
 import { formatTimeToLocal, getCurrentTimestamp, getTimeRemaining } from '../utils/timeUtils';
+import { STRIKE_PRICE_MULTIPLIER } from '../utils/constants';
 
+/**
+ * Enums for market sides and phases
+ */
 enum Side { Long, Short }
 enum Phase { Trading, Bidding, Maturity, Expiry }
 
 
-interface Coin {
-  value: string;
-  label: string;
-}
-
-interface PositionHistory {
-  timestamp: number;
-  longPercentage: number;
-  shortPercentage: number;
-}
-
-// Thêm interface cho symbol mapping
-interface CoinSymbol {
-  [key: string]: string;
-}
-
-// Thêm interface cho position data
+/**
+ * Interface for position data tracking
+ */
 interface PositionData {
   timestamp: number;
   longPercentage: number;
@@ -51,26 +45,31 @@ interface PositionData {
   isVisible: boolean;
 }
 
-// Thêm interface cho position point
+/**
+ * Interface for position point used in charts and history
+ */
 interface PositionPoint {
   timestamp: number;
   longPercentage: number | null;
   shortPercentage: number | null;
   isMainPoint: boolean;
   isFixed?: boolean;
-  isCurrentPoint?: boolean; // Flag mới để đánh dấu điểm hiện tại
+  isCurrentPoint?: boolean;
 }
 
-// Thêm interface cho event history
-interface BidEvent {
-  timestamp: number;
-  longAmount: BigNumber;
-  shortAmount: BigNumber;
-}
-
+/**
+ * Props interface for the Customer component
+ */
 interface CustomerProps {
   contractAddress?: string;
 }
+
+
+/**
+ * Utility function to fetch market details from a contract
+ * @param contract - The ethers.js contract instance
+ * @returns Object containing phase and oracle details
+ */
 
 export const fetchMarketDetails = async (contract: ethers.Contract) => {
   try {
@@ -83,7 +82,9 @@ export const fetchMarketDetails = async (contract: ethers.Contract) => {
   }
 };
 
-// Di chuyển providerConfig ra ngoài component và thêm các cấu hình cần thiết
+/**
+ * Provider configuration for Ethereum interaction
+ */
 const providerConfig = {
   chainId: 31337,
   name: 'local',
@@ -93,7 +94,10 @@ const providerConfig = {
   staticNetwork: true
 };
 
-// Tạo hàm helper để lấy provider và signer
+/**
+ * Helper function to get Ethereum provider and signer
+ * @returns Object containing provider and signer
+ */
 const getProviderAndSigner = async () => {
   const provider = new ethers.providers.Web3Provider(window.ethereum, providerConfig);
   await provider.send("eth_requestAccounts", []); // Yêu cầu kết nối ví
@@ -101,78 +105,97 @@ const getProviderAndSigner = async () => {
   return { provider, signer };
 };
 
-// Thêm hàm helper để chuyển đổi UTC sang múi giờ Eastern
-const toETTime = (utcTimestamp) => {
-  return toZonedTime(new Date(utcTimestamp * 1000), 'America/New_York');
+
+/**
+ * Helper function to convert trading pair to chart symbol format
+ * @param tradingPair - The trading pair string (e.g., "BTC/USD")
+ * @returns Formatted chart symbol (e.g., "BTC-USD")
+ */
+const getChartSymbolFromTradingPair = (tradingPair: string): string => {
+  if (!tradingPair) return '';
+  return tradingPair.replace('/', '-');
 };
 
+/**
+ * Main Customer component
+ * @param param0 - Component props including optional initial contract address
+ */
 function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
+  // Auth context and router
   const { isConnected, walletAddress, balance, connectWallet, refreshBalance } = useAuth();
+  const router = useRouter();
+
+  // Contract and market state
   const [selectedSide, setSelectedSide] = useState<Side | null>(null);
   const [contractBalance, setContractBalance] = useState(0);
-  const [accumulatedWinnings, setAccumulatedWinnings] = useState(0);
   const [bidAmount, setBidAmount] = useState("");
   const [currentPhase, setCurrentPhase] = useState<Phase>(Phase.Trading);
   const [totalDeposited, setTotalDeposited] = useState(0);
   const [strikePrice, setStrikePrice] = useState<string>('');
   const [finalPrice, setFinalPrice] = useState<string>('');
   const [showClaimButton, setShowClaimButton] = useState(false);
-  const [reward, setReward] = useState(0); // Số phần thưởng khi người chơi thắng
+  const [reward, setReward] = useState(0);
   const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [positions, setPositions] = useState<{ long: number; short: number }>({ long: 0, short: 0 });
   const [contractAddress, setContractAddress] = useState(initialContractAddress || '');
+
+  // Price and chart data
   const [currentPrice, setCurrentPrice] = useState<number>(0);
   const [chartData, setChartData] = useState<any[]>([]);
+  const [chartSymbol, setChartSymbol] = useState('BTCUSDT');
+  const [tradingPair, setTradingPair] = useState('');
+
+  // Market phase flags
   const [canResolve, setCanResolve] = useState(false);
   const [canExpire, setCanExpire] = useState(false);
   const [marketResult, setMarketResult] = useState<string>('');
+
+  // User-related state
   const [userPosition, setUserPosition] = useState<Side | null>(null);
-  const [tradingPair, setTradingPair] = useState('');
-  const [chartSymbol, setChartSymbol] = useState('BTCUSDT');
-  const [biddingStartTime, setBiddingStartTime] = useState<number>(0);
-  const [deployTime, setDeployTime] = useState<number>(0);
-  const [positionHistory, setPositionHistory] = useState<PositionPoint[]>([]);
-  const positionHistoryKey = `position_history_${contractAddress}`;
-  const [biddingStartTimestamp, setBiddingStartTimestamp] = useState<number>(0);
-  const [maturityTime, setMaturityTime] = useState<number>(0);
-  const [oracleDetails, setOracleDetails] = useState<any>(null);
-  const [resolveTime, setResolveTime] = useState<number>(0);
-  const [positionData, setPositionData] = useState<PositionData[]>([]);
   const [userPositions, setUserPositions] = useState<{ long: number; short: number }>({ long: 0, short: 0 });
   const [isOwner, setIsOwner] = useState(false);
+
+  // Time-related state
+  const [biddingStartTime, setBiddingStartTime] = useState<number>(0);
+  const [deployTime, setDeployTime] = useState<number>(0);
+  const [maturityTime, setMaturityTime] = useState<number>(0);
+  const [resolveTime, setResolveTime] = useState<number>(0);
+
+  // Position history and data
+  const [positionHistory, setPositionHistory] = useState<PositionPoint[]>([]);
+  const positionHistoryKey = useMemo(() => {
+    return `positionHistory_${contractAddress}`;
+  }, [contractAddress]);
+  const [positionData, setPositionData] = useState<PositionData[]>([]);
+  const [enhancedPositionData, setEnhancedPositionData] = useState<PositionPoint[]>([]);
+
+  // Oracle details
+  const [oracleDetails, setOracleDetails] = useState<any>(null);
+
+  // UI state
   const [isResolving, setIsResolving] = useState(false);
   const [isExpiring, setIsExpiring] = useState(false);
   const [priceTimeRange, setPriceTimeRange] = useState<string>('1w');
   const [positionTimeRange, setPositionTimeRange] = useState<string>('all');
   const [isResolvingMarket, setIsResolvingMarket] = useState<boolean>(false);
   const [isExpiringMarket, setIsExpiringMarket] = useState<boolean>(false);
-  const [potentialProfit, setPotentialProfit] = useState<{ b: number; c: number }>({ b: 0, c: 0 });
+  const [potentialProfit, setPotentialProfit] = useState<string>("0.0000");
+  const [profitPercentage, setProfitPercentage] = useState<number>(0);
   const [feePercentage, setFeePercentage] = useState<string>('0');
-  const router = useRouter();
-
-  // Thêm mapping từ contract address sang symbol Binance
-  const coinSymbols: CoinSymbol = {
-    "0x5fbdb2315678afecb367f032d93f642f64180aa3": "ICPUSDT",
-    "0x6fbdb2315678afecb367f032d93f642f64180aa3": "ETHUSDT",
-    "0x7fbdb2315678afecb367f032d93f642f64180aa3": "BTCUSDT"
-  };
-
-  // Sửa lại availableCoins để thêm thông tin symbol
-  const [availableCoins] = useState<Coin[]>([
-    { value: "0x5fbdb2315678afecb367f032d93f642f64180aa3", label: "ICP/USD" },
-    { value: "0x6fbdb2315678afecb367f032d93f642f64180aa3", label: "ETH/USD" },
-    { value: "0x7fbdb2315678afecb367f032d93f642f64180aa3", label: "BTC/USD" }
-  ]);
+  const [isLoadingContractData, setIsLoadingContractData] = useState<boolean>(true);
+  const [isLoadingPositionHistory, setIsLoadingPositionHistory] = useState(true);
+  const [contractOwner, setContractOwner] = useState<string | null>(null);
+  const [showRules, setShowRules] = useState(false);
 
   const toast = useToast();
-  const priceControls = useAnimation();
 
+  /**
+ * Effect to initialize contract address from props or localStorage
+ */
   useEffect(() => {
-    // Nếu có initialContractAddress từ props, sử dụng nó
     if (initialContractAddress) {
       setContractAddress(initialContractAddress);
     }
-    // Nếu không, thử đọc từ localStorage
     else {
       const savedAddress = localStorage.getItem('selectedContractAddress');
       if (savedAddress) {
@@ -181,13 +204,18 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   }, [initialContractAddress]);
 
+  /**
+   * Effect to clean up localStorage when component unmounts
+   */
   useEffect(() => {
     return () => {
-      // Xóa địa chỉ khỏi localStorage khi rời khỏi trang
       localStorage.removeItem('selectedContractAddress');
     };
   }, []);
 
+  /**
+ * Effect to initialize contract when wallet is connected and address is available
+ */
   useEffect(() => {
     const initContract = async () => {
       if (isConnected && contractAddress) {
@@ -208,6 +236,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     initContract();
   }, [isConnected, contractAddress]);
 
+  /**
+   * Effect to fetch market details periodically
+   */
   useEffect(() => {
     const interval = setInterval(() => {
       if (contract) {
@@ -217,21 +248,26 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     return () => clearInterval(interval);
   }, [contract]);
 
+  /**
+   * Effect to fetch contract balance when contract address changes
+   */
   useEffect(() => {
     if (contractAddress) {
       fetchContractBalance();
     }
   }, [contractAddress]);
 
-  // Thêm useEffect để load position history khi contract address thay đổi
+  /**
+   * Effect to load position history when contract address changes
+   */
   useEffect(() => {
     if (contractAddress) {
-      // Load position history từ localStorage
+      // Load position history from localStorage
       const savedHistory = localStorage.getItem(positionHistoryKey);
       if (savedHistory) {
         setPositionHistory(JSON.parse(savedHistory));
       } else {
-        // Khởi tạo history mới nếu chưa có
+        // Initialize new history if not available
         setPositionHistory([{
           timestamp: Date.now(),
           longPercentage: 50,
@@ -243,13 +279,13 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   }, [contractAddress]);
 
-  // Thêm hàm chuyển đổi từ trading pair từ contract sang định dạng API
   const formatTradingPairForApi = (pair: string): string => {
-    // Ví dụ: "BTC/USD" -> "BTC-USD" cho Coinbase API
     return pair.replace('/', '-');
   };
 
-  // Sửa lại hàm fetchMarketDetails để lưu tradingPair và chartSymbol
+  /**
+   * Function to fetch market details and update state
+   */
   const fetchMarketDetails = async () => {
     if (!contract || !walletAddress) return;
     try {
@@ -283,26 +319,26 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         contract.feePercentage()
       ]);
 
-      // Lưu trading pair vào state
+      // Save trading pair to state
       setTradingPair(tradingPair);
 
-      // Định dạng trading pair cho API và lưu vào chartSymbol
+      // Format trading pair for API and save to chartSymbol
       const formattedSymbol = formatTradingPairForApi(tradingPair);
       setChartSymbol(formattedSymbol);
 
-      // Cập nhật tổng positions
+      // Update total positions
       setPositions({
         long: parseFloat(ethers.utils.formatEther(positions.long)),
         short: parseFloat(ethers.utils.formatEther(positions.short))
       });
 
-      // Cập nhật user positions từ mappings
+      // Update user positions from mappings
       setUserPositions({
         long: parseFloat(ethers.utils.formatEther(longPosition)),
         short: parseFloat(ethers.utils.formatEther(shortPosition))
       });
 
-      // Cập nhật userPosition dựa trên vị thế hiện tại
+      // Update userPosition based on current position
       if (parseFloat(ethers.utils.formatEther(longPosition)) > 0) {
         setUserPosition(Side.Long);
       } else if (parseFloat(ethers.utils.formatEther(shortPosition)) > 0) {
@@ -311,7 +347,10 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         setUserPosition(null);
       }
 
-      setStrikePrice(ethers.utils.formatUnits(strikePrice, 0));
+      // Update strikePrice - convert from integer (stored in blockchain) to float
+      const strikePriceInteger = ethers.utils.formatUnits(strikePrice, 0);
+      setStrikePrice((parseInt(strikePriceInteger) / STRIKE_PRICE_MULTIPLIER).toString());
+
       setMaturityTime(maturityTime.toNumber());
       setOracleDetails(oracleDetails);
       setTotalDeposited(parseFloat(ethers.utils.formatEther(totalDeposited)));
@@ -319,7 +358,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       setBiddingStartTime(Number(biddingStartTime));
       setResolveTime(Number(resolveTime));
       setFeePercentage(feePercentage.toString());
-      // Kiểm tra có thể resolve và expire
+      // Check if can resolve and expire
       const now = Math.floor(Date.now() / 1000);
       setCanResolve(phase === Phase.Bidding && now >= maturityTime.toNumber());
       setCanExpire(
@@ -328,7 +367,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         now >= resolveTime.toNumber() + 30
       );
 
-      // Lấy finalPrice từ oracleDetails khi ở phase Maturity hoặc Expiry
+      // Get finalPrice from oracleDetails when at phase Maturity or Expiry
       if (phase === Phase.Maturity || phase === Phase.Expiry) {
         setFinalPrice(oracleDetails.finalPrice.toString());
       }
@@ -336,22 +375,28 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     } catch (error) {
       console.error("Error fetching market details:", error);
     }
-  }, [contractAddress]);
+  };
 
+  /**
+   * Function to fetch contract balance
+   */
   const fetchContractBalance = async () => {
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const contractBalanceWei = await provider.getBalance(contractAddress);
       const contractBalanceEth = parseFloat(ethers.utils.formatEther(contractBalanceWei));
-      setContractBalance(contractBalanceEth); // Cập nhật vào state
+      setContractBalance(contractBalanceEth); // Update state
     } catch (error) {
       console.error("Failed to fetch contract balance:", error);
     }
   };
 
-  // Thêm hàm kiểm tra kết quả market
+  /**
+   * Function to check market result
+   */
   const checkMarketResult = async () => {
     if (!contract) return;
+
     try {
       const oracleDetails = await contract.oracleDetails();
       const finalPrice = parseFloat(oracleDetails.finalPrice);
@@ -367,7 +412,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   };
 
-  // Thêm useEffect để kiểm tra kết quả khi phase thay đổi
+  /**
+   * Effect to check market result when phase changes
+   */
   useEffect(() => {
     if (currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) {
       checkMarketResult();
@@ -376,10 +423,13 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   }, [currentPhase, contract]);
 
-  // Sửa lại useEffect để kiểm tra thời gian
+  /**
+   * Effect to check timing when phase changes
+   */
   useEffect(() => {
     const checkTiming = async () => {
       if (!contract) return;
+
       try {
         const biddingStartTime = await contract.biddingStartTime();
         const resolveTime = await contract.resolveTime();
@@ -405,30 +455,10 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     return () => clearInterval(interval);
   }, [contract, currentPhase]);
 
-  // Thêm hàm để tính toán phần trăm
-  const calculatePercentages = (longAmount: number, shortAmount: number) => {
-    const total = longAmount + shortAmount;
-    if (total === 0) return { long: 50, short: 50 };
 
-    const longPercentage = (longAmount / total) * 100;
-    const shortPercentage = (shortAmount / total) * 100;
-    return { long: longPercentage, short: shortPercentage };
-  };
-
-  // Thêm hàm để tính toán các mốc thời gian
-  const calculateTimePoints = (deployTime: number, maturityTime: number) => {
-    const duration = maturityTime - deployTime;
-    const interval = Math.floor(duration / 10); // Chia làm 10 điểm
-    const timePoints = [];
-
-    for (let i = 0; i <= 10; i++) {
-      timePoints.push(deployTime + (interval * i));
-    }
-
-    return timePoints;
-  };
-
-  // Thêm hàm tạo các mốc thời gian
+  /**
+   * Function to create time points
+   */
   const createTimePoints = (startTime: number, endTime: number, numPoints: number = 20) => {
     const points: PositionData[] = [];
     const interval = Math.floor((endTime - startTime) / (numPoints - 1));
@@ -446,7 +476,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     return points;
   };
 
-  // Sửa lại phần xử lý position data trong component
+  /**
+   * Effect to handle position data in component
+   */
   useEffect(() => {
     if (!contract || currentPhase !== Phase.Bidding) return;
 
@@ -495,1852 +527,1656 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       }
     };
 
-    // Khởi tạo dữ liệu ban đầu
+    // Initialize initial data
     initializePositionData();
 
-    // Cập nhật dữ liệu mỗi giây
+    // Update data every second
     const interval = setInterval(updatePositionData, 1000);
     return () => clearInterval(interval);
   }, [contract, currentPhase, positions]);
 
 
-  // Sửa lại handleBid
-  const handleBid = async (side: Side) => {
-    if (!contract || !bidAmount || parseFloat(bidAmount) <= 0) return;
-
-    try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
-      const bidAmountWei = ethers.utils.parseEther(bidAmount);
-
-      // Gọi hàm bid của contract với signer
-      const tx = await contractWithSigner.bid(side, {
-        value: bidAmountWei,
-        gasLimit: 500000
-      });
-
-      await tx.wait();
-
-      // Cập nhật UI sau khi bid thành công
-      toast({
-        title: "Bid placed successfully!",
-        status: "success",
-        duration: 3000,
-        isClosable: true,
-      });
-
-      // Reset bid amount và refresh data
-      await refreshBalance();
-      await fetchMarketDetails();
-      setBidAmount("");
-    } catch (error: any) {
-      console.error("Error placing bid:", error);
-      toast({
-        title: "Failed to place bid",
-        description: error.message || "An unexpected error occurred",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
+  // Function to calculate potential profit - improved to handle empty bidAmount
+  const calculatePotentialProfit = useCallback((side: Side, amount: string) => {
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0 || !positions) {
+      setPotentialProfit("0.0000");
+      setProfitPercentage(0);
+      return;
     }
-  };
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (contract && currentPhase !== Phase.Bidding) { // Ngăn không cho cập nhật trong phase Bidding
-        fetchMarketDetails();
-      }
-    }, 5000); // Gọi hàm mỗi 5 giây
-    return () => clearInterval(interval); // Clear interval khi component bị unmount
-  }, [contract, currentPhase]);
+    const bidAmountInEth = parseFloat(amount);
+    let potentialReturn = 0;
+    let profitPercentage = 0;
 
-
-
-
-  const canClaimReward = useCallback(async () => {
-    if (!contract || currentPhase !== Phase.Expiry) return;
-
-    try {
-
-
-      // Kiểm tra xem đã claim chưa
-      const hasClaimed = await contract.hasClaimed(walletAddress);
-      console.log("Has claimed:", hasClaimed);
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);  // Kết nối contract với signer
-
-      // Lấy thông tin oracle
-      const oracleDetails = await contract.oracleDetails();
-      const finalPrice = parseFloat(oracleDetails.finalPrice);
-      const strikePrice = parseFloat(oracleDetails.strikePrice);
-      console.log("Prices:", { finalPrice, strikePrice });
-
-      // Sửa lại logic: finalPrice < strikePrice thì SHORT win
-      const winningSide = finalPrice < strikePrice ? Side.Short : Side.Long;
-      console.log("Winning side:", winningSide);
-
-      // Kiểm tra số tiền đặt cược của user
-      const userDeposit = winningSide === Side.Long ?
-        await contract.longBids(walletAddress) :
-        await contract.shortBids(walletAddress);
-      console.log("User deposit:", userDeposit.toString());
-
-      // Hiển thị nút claim nếu:
-      // 1. Chưa claim
-      // 2. Có đặt cược ở bên thắng
-      // 3. Đang ở phase Expiry
-      if (!hasClaimed && userDeposit.gt(0) && currentPhase === Phase.Expiry) {
-        setShowClaimButton(true);
-
-        // Tính toán reward
-        const positions = await contract.positions();
-        const totalWinningDeposits = winningSide === Side.Long ? positions.long : positions.short;
-        const totalDeposited = positions.long.add(positions.short);
-
-        const reward = userDeposit.mul(totalDeposited).div(totalWinningDeposits);
-        const fee = reward.mul(10).div(100); // 10% fee
-        const finalReward = reward.sub(fee);
-
-        setReward(parseFloat(ethers.utils.formatEther(finalReward)));
-      } else {
-        setShowClaimButton(false);
-      }
-
-    } catch (error) {
-      console.error("Error checking claim eligibility:", error);
-      setShowClaimButton(false);
-    }
-  }, [contract, currentPhase, walletAddress]);
-
-  // Thêm useEffect để check claim eligibility
-  useEffect(() => {
-    if (currentPhase === Phase.Expiry) {
-      canClaimReward();
-    }
-  }, [currentPhase, canClaimReward]);
-
-  // Reset lại thị trường
-  const resetMarket = () => {
-    setPositions({ long: 0, short: 0 });
-    setTotalDeposited(0);
-    setStrikePrice('0');
-    setFinalPrice('0');
-    setCurrentPhase(Phase.Bidding);
-    priceControls.set({ opacity: 1, color: "#FEDF56" });
-  };
-
-
-  const abbreviateAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
-
-  useEffect(() => {
-    const priceService = PriceService.getInstance();
-
-    const handlePriceUpdate = (priceData: PriceData) => {
-      setCurrentPrice(priceData.price);
-    };
-
-    // Subscribe to price updates when component mounts
-    priceService.subscribeToPriceUpdates(handlePriceUpdate, chartSymbol, 5000);
-
-    // Cleanup subscription when component unmounts
-    return () => {
-      priceService.unsubscribeFromPriceUpdates(handlePriceUpdate);
-    };
-  }, []);
-
-  // Sửa lại useEffect cho price history
-  useEffect(() => {
-    const fetchPriceHistory = async () => {
-      try {
-        console.log('Fetching price history for symbol:', chartSymbol);
-        const priceService = PriceService.getInstance();
-        const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
-        setChartData(klines);
-      } catch (error) {
-        console.error("Error fetching price history:", error);
-      }
-    };
-
-    fetchPriceHistory();
-    const interval = setInterval(fetchPriceHistory, 60000);
-    return () => clearInterval(interval);
-  }, [chartSymbol]);
-
-  // Thêm hàm xử lý resolve và expire
-
-
-  const handleExpireMarket = async () => {
-    if (!contract) return;
-    try {
-      console.log("Attempting to expire market...");
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
-      // Hiển thị thông báo đang xử lý
-      toast({
-        title: "Expiring market...",
-        description: "Please wait while the transaction is being processed",
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      const tx = await contractWithSigner.expireMarket({
-        gasLimit: 500000
-      });
-
-      console.log("Transaction sent:", tx.hash);
-
-      // Hiển thị thông báo transaction đã được gửi
-      toast({
-        title: "Transaction sent",
-        description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      await tx.wait();
-
-      // Hiển thị thông báo thành công
-      toast({
-        title: "Market expired successfully!",
-        status: "success",
-        duration: 3000,
-        isClosable: true,
-      });
-
-      // Refresh market details
-      await fetchMarketDetails();
-
-      // Cập nhật UI ngay lập tức
-      setCurrentPhase(Phase.Expiry);
-      setCanExpire(false);
-
-      return true;
-    } catch (error: any) {
-      console.error("Error expiring market:", error);
-      toast({
-        title: "Failed to expire market",
-        description: error.message || "An unexpected error occurred",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    const loadContractData = async () => {
-      try {
-        const contractAddress = localStorage.getItem('selectedContractAddress');
-        if (!contractAddress) return;
-
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const contract = new ethers.Contract(
-          contractAddress,
-          BinaryOptionMarket.abi,
-          provider
-        );
-
-        // Lấy tất cả thông tin cần thiết từ contract
-        try {
-          const [
-            positions,
-            strikePriceBN,
-            phase,
-            biddingStartTime,
-            tradingPair,
-            deployTimestamp,
-            feePercentage
-          ] = await Promise.all([
-            contract.positions(),
-            contract.strikePrice(),
-            contract.currentPhase(),
-            contract.biddingStartTime(),
-            contract.tradingPair().catch(() => 'Unknown'),
-            contract.deployTime(),
-            contract.feePercentage()
-          ]);
-
-          // Cập nhật states
-          setContract(contract);
-          setContractAddress(contractAddress);
-          setStrikePrice(ethers.utils.formatUnits(strikePriceBN, 0));
-          setCurrentPhase(phase);
-          setTradingPair(tradingPair);
-          setBiddingStartTime(biddingStartTime.toNumber());
-          setDeployTime(deployTimestamp.toNumber());
-          // Set chart symbol dựa trên trading pair
-          const symbol = tradingPair === "BTC/USD" ? "BTCUSDT" :
-            tradingPair === "ETH/USD" ? "ETHUSDT" :
-              tradingPair === "ICP/USD" ? "ICPUSDT" : "BTCUSDT";
-          setChartSymbol(symbol);
-          console.log("Chart symbol:", symbol);
-          // Cập nhật positions
-          setPositions({
-            long: parseFloat(ethers.utils.formatEther(positions.long)),
-            short: parseFloat(ethers.utils.formatEther(positions.short))
-          });
-
-        } catch (error) {
-          console.error("Error loading contract data:", error);
-          // Set default values nếu có lỗi
-          setTradingPair('Unknown');
-          //setChartSymbol('BTCUSDT');
-        }
-
-      } catch (error) {
-        console.error("Error:", error);
-      }
-    };
-
-    loadContractData();
-  }, []);
-
-  // Sửa lại useEffect cho price chart
-  useEffect(() => {
-    const fetchPriceHistory = async () => {
-      try {
-        console.log('Fetching price history for symbol:', chartSymbol);
-        const priceService = PriceService.getInstance();
-        const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
-        setChartData(klines);
-      } catch (error) {
-        console.error("Error fetching price history:", error);
-      }
-    };
-
-    fetchPriceHistory();
-    const interval = setInterval(fetchPriceHistory, 60000);
-    return () => clearInterval(interval);
-  }, [chartSymbol]);
-
-  // Add near other state declarations
-  const phaseCircleProps = (phase: Phase) => ({
-    bg: currentPhase === phase ? "#FEDF56" : "gray.700",
-    color: currentPhase === phase ? "black" : "gray.500",
-    fontWeight: "bold",
-    zIndex: 1
-  });
-
-  // Thêm hàm resolve
-  const resolve = async () => {
-    if (!contract) return;
-
-    try {
-      console.log("Attempting to resolve market...");
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
-      // Hiển thị thông báo đang xử lý
-      toast({
-        title: "Resolving market...",
-        description: "Please wait while the transaction is being processed",
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      const tx = await contractWithSigner.resolveMarket({
-        gasLimit: 500000
-      });
-
-      console.log("Transaction sent:", tx.hash);
-
-      // Hiển thị thông báo transaction đã được gửi
-      toast({
-        title: "Transaction sent",
-        description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      await tx.wait();
-
-      // Hiển thị thông báo thành công
-      toast({
-        title: "Market resolved successfully!",
-        status: "success",
-        duration: 3000,
-        isClosable: true,
-      });
-
-      // Refresh market details
-      await fetchMarketDetails();
-
-      // Cập nhật UI ngay lập tức
-      setCurrentPhase(Phase.Maturity);
-      setCanResolve(false);
-
-      return true;
-    } catch (error: any) {
-      console.error("Error resolving market:", error);
-      toast({
-        title: "Failed to resolve market",
-        description: error.message || "An unexpected error occurred",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-      return false;
-    }
-  };
-
-  // Thêm cleanup khi component unmount
-  // useEffect(() => {
-  //   return () => {
-  //     if (contractAddress) {
-  //       // Lưu position history cuối cùng vào localStorage
-  //       localStorage.setItem(positionHistoryKey, JSON.stringify(positionHistory));
-  //     }
-  //   };
-  // }, [contractAddress, positionHistory]);
-
-  // Thêm lại hàm claimReward
-  const claimReward = async () => {
-    if (!contract || currentPhase !== Phase.Expiry) return;
-
-    try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
-      const tx = await contractWithSigner.claimReward();
-      await tx.wait();
-
-      // Update states after successful claim
-      await Promise.all([
-        fetchMarketDetails(),
-        fetchContractBalance()
-      ]);
-
-      await refreshBalance();
-      setShowClaimButton(false);
-      setReward(0);
-
-      toast({
-        title: "Success",
-        description: "Successfully claimed reward!",
-        status: "success",
-        duration: 3000,
-      });
-
-    } catch (error) {
-      console.error("Error claiming reward:", error);
-      toast({
-        title: "Error claiming reward",
-        description: error.message,
-        status: "error",
-        duration: 3000,
-      });
-    }
-  };
-
-  // Sửa lại hàm fetchPositionHistory
-  const fetchPositionHistory = async () => {
-    if (!contract) return [];
-    try {
-      const deployTime = await contract.deployTime();
-      if (!deployTime) throw new Error("Deploy time is null");
-
-      // Lấy block hiện tại
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const currentBlock = await provider.getBlockNumber();
-
-      // Lấy tất cả events từ block 0 đến block hiện tại
-      const events = await contract.queryFilter(
-        contract.filters.PositionUpdated(),
-        0,
-        currentBlock
-      );
-
-      // Sắp xếp events theo thời gian
-      const sortedEvents = events.sort((a, b) =>
-        a.args.timestamp.toNumber() - b.args.timestamp.toNumber()
-      );
-
-      return sortedEvents.map(event => ({
-        timestamp: event.args.timestamp.toNumber(),
-        longAmount: event.args.longAmount,
-        shortAmount: event.args.shortAmount
-      }));
-    } catch (error) {
-      console.error("Error fetching position history:", error);
-      return [];
-    }
-  };
-
-  // Thêm hàm helper để tạo các điểm phụ giữa các mốc chính
-  const createIntermediatePoints = (startTime: number, endTime: number) => {
-    const points: PositionPoint[] = [];
-    const interval = 1; // 1 giây cho mỗi điểm
-    const totalPoints = Math.floor((endTime - startTime) / interval);
-
-    for (let i = 0; i <= totalPoints; i++) {
-      const timestamp = startTime + (i * interval);
-      points.push({
-        timestamp,
-        longPercentage: null,
-        shortPercentage: null,
-        isMainPoint: false,
-        isFixed: false
-      });
-    }
-    return points;
-  };
-
-  // Thêm helper function để tạo mẫu dữ liệu ban đầu cho positionHistory
-  const createInitialPositionHistory = (startTime: number) => {
-    const nowTimestamp = Math.floor(Date.now() / 1000);
-    const oneDay = 24 * 60 * 60;
-
-    // Tạo dữ liệu cho 7 ngày trước đó nếu có
-    const history = [];
-
-    // Thêm điểm ban đầu (50/50)
-    history.push({
-      timestamp: startTime,
-      longPercentage: 50,
-      shortPercentage: 50,
-      isMainPoint: true,
-      isFixed: true
-    });
-
-    return history;
-  };
-
-  // Sửa phần xử lý positionHistory trong useEffect
-  useEffect(() => {
-    if (contractAddress) {
-      // Load position history từ localStorage hoặc khởi tạo mới
-      const savedHistory = localStorage.getItem(positionHistoryKey);
-      if (savedHistory) {
-        setPositionHistory(JSON.parse(savedHistory));
-      } else if (biddingStartTime) {
-        // Khởi tạo history mới với biddingStartTime
-        setPositionHistory(createInitialPositionHistory(biddingStartTime));
-      }
-    }
-  }, [contractAddress, biddingStartTime]);
-
-  // Cập nhật positionHistory khi có thay đổi về positions
-  useEffect(() => {
-    if (!positions || !currentPhase || currentPhase < Phase.Bidding) return;
-
+    // Total current bid amount
     const longAmount = positions.long;
     const shortAmount = positions.short;
-    const total = longAmount + shortAmount;
+    const totalBids = longAmount + shortAmount;
 
-    if (total > 0) {
-      const longPercentage = (longAmount / total) * 100;
-      const shortPercentage = (shortAmount / total) * 100;
-      const timestamp = Math.floor(Date.now() / 1000);
+    // Apply fee
+    const feeAmount = bidAmountInEth * (Number(feePercentage) / 1000);
+    const bidAmountAfterFee = bidAmountInEth - feeAmount;
 
-      // Thêm điểm mới vào positionHistory nếu có thay đổi đáng kể
-      setPositionHistory(prev => {
-        // Kiểm tra xem đã có điểm gần đây chưa
-        const lastPoint = prev[prev.length - 1];
+    if (side === Side.Long) {
+      // If choose LONG
+      const newLongAmount = longAmount + bidAmountInEth;
 
-        // Cập nhật isCurrentPoint cho tất cả các điểm
-        const updatedHistory = prev.map(point => ({
-          ...point,
-          isCurrentPoint: false // Đặt tất cả false trước
-        }));
+      if (shortAmount === 0) {
+        // If no one bid SHORT, only get back bid amount after fee
+        potentialReturn = bidAmountAfterFee;
+        profitPercentage = -1 * (Number(feePercentage) / 10); // Only lose fee
+      } else {
+        // Calculate profit percentage based on LONG/SHORT ratio
+        const totalPool = totalBids + bidAmountInEth;
+        const poolAfterFee = totalPool - feeAmount;
 
-        // Chỉ thêm điểm mới nếu có thay đổi lớn hơn 0.5% hoặc sau 1 giờ
-        const significantChange = Math.abs(lastPoint?.longPercentage - longPercentage) > 0.5;
-        const timeChange = !lastPoint || (timestamp - lastPoint.timestamp) > 3600;
-
-        if (significantChange || timeChange) {
-          const newPoint = {
-            timestamp,
-            longPercentage,
-            shortPercentage,
-            isMainPoint: true,
-            isFixed: false,
-            isCurrentPoint: true // Đánh dấu điểm mới nhất
-          };
-
-          const newHistory = [...updatedHistory, newPoint];
-
-          // Lưu vào localStorage
-          localStorage.setItem(positionHistoryKey, JSON.stringify(newHistory));
-          return newHistory;
-        }
-
-        return updatedHistory;
-      });
-    }
-  }, [positions, currentPhase]);
-
-  // Thêm hàm kiểm tra quyền hạn
-  const checkPermissions = async () => {
-    if (!contract || !walletAddress) return;
-
-    try {
-      // Kiểm tra xem contract có hàm owner() không
-      let owner;
-      try {
-        owner = await contract.owner();
-        setIsOwner(owner.toLowerCase() === walletAddress.toLowerCase());
-        console.log("Contract owner:", owner);
-        console.log("Current wallet:", walletAddress);
-        console.log("Is owner:", owner.toLowerCase() === walletAddress.toLowerCase());
-      } catch (e) {
-        console.log("Contract does not have owner() function or error occurred:", e);
+        // Win ratio based on SHORT amount
+        const winRatio = shortAmount / newLongAmount;
+        potentialReturn = bidAmountInEth + (bidAmountAfterFee * winRatio);
+        profitPercentage = ((potentialReturn - bidAmountInEth) / bidAmountInEth) * 100;
       }
-
-      // Kiểm tra xem có thể gọi hàm resolveMarket không
-      try {
-        // Chỉ kiểm tra xem hàm có tồn tại không, không thực sự gọi nó
-        const resolveFunction = contract.resolveMarket;
-        console.log("resolveMarket function exists:", !!resolveFunction);
-      } catch (e) {
-        console.log("Error checking resolveMarket function:", e);
-      }
-
-      // Kiểm tra xem có thể gọi hàm expireMarket không
-      try {
-        // Chỉ kiểm tra xem hàm có tồn tại không, không thực sự gọi nó
-        const expireFunction = contract.expireMarket;
-        console.log("expireMarket function exists:", !!expireFunction);
-      } catch (e) {
-        console.log("Error checking expireMarket function:", e);
-      }
-    } catch (error) {
-      console.error("Error checking permissions:", error);
-    }
-  };
-
-  // Gọi hàm kiểm tra quyền hạn khi component mount
-  useEffect(() => {
-    if (contract && walletAddress) {
-      checkPermissions();
-    }
-  }, [contract, walletAddress]);
-
-  const isMarketEnded = (maturityTime: any, phase: string): boolean => {
-    const currentTime = new Date();
-    const maturityDate = new Date(maturityTime * 1000);
-    return currentTime.getTime() >= maturityDate.getTime();
-  };
-
-
-  // Thay thế logic kiểm tra phase dựa trên thời gian
-  useEffect(() => {
-    // Kiểm tra và cập nhật phase dựa trên thời gian hiện tại
-    const checkPhaseBasedOnTime = () => {
-      const now = getCurrentTimestamp();
-
-      if (currentPhase === Phase.Bidding && now >= maturityTime) {
-        setCanResolve(true);
-      }
-
-      if (currentPhase === Phase.Maturity && resolveTime > 0 && now >= resolveTime + 30) {
-        setCanExpire(true);
-      }
-    };
-
-    checkPhaseBasedOnTime();
-    const interval = setInterval(checkPhaseBasedOnTime, 1000);
-    return () => clearInterval(interval);
-  }, [currentPhase, maturityTime, resolveTime]);
-
-  // Calculate long and short percentages
-  const longPercentage = useMemo(() => {
-    const total = positions.long + positions.short;
-    return total > 0 ? (positions.long / total) * 100 : 50;
-  }, [positions]);
-
-  const shortPercentage = useMemo(() => {
-    const total = positions.long + positions.short;
-    return total > 0 ? (positions.short / total) * 100 : 50;
-  }, [positions]);
-
-
-  // Format date functions
-  const formatDate = (date: Date): string => {
-    return format(date, 'MMM dd, yyyy HH:mm');
-  };
-
-  const formatMaturityTime = (timestamp: number): string => {
-    if (!timestamp) return 'Pending';
-    return format(new Date(timestamp * 1000), 'MMM dd, yyyy HH:mm');
-  };
-
-  // Handle time range changes
-  const handleTimeRangeChange = (range: string, chartType: 'price' | 'position') => {
-    if (chartType === 'price') {
-      setPriceTimeRange(range);
     } else {
-      setPositionTimeRange(range);
+      // If choose SHORT
+      const newShortAmount = shortAmount + bidAmountInEth;
+
+      if (longAmount === 0) {
+        // If no one bid LONG, only get back bid amount after fee
+        potentialReturn = bidAmountAfterFee;
+        profitPercentage = -1 * (Number(feePercentage) / 10); // Only lose fee
+      } else {
+        // Calculate profit percentage based on LONG/SHORT ratio
+        const totalPool = totalBids + bidAmountInEth;
+        const poolAfterFee = totalPool - feeAmount;
+
+        // Win ratio based on LONG amount
+        const winRatio = longAmount / newShortAmount;
+        potentialReturn = bidAmountInEth + (bidAmountAfterFee * winRatio);
+        profitPercentage = ((potentialReturn - bidAmountInEth) / bidAmountInEth) * 100;
+      }
     }
+
+    setPotentialProfit(potentialReturn.toFixed(4));
+    setProfitPercentage(profitPercentage);
+  }, [positions, feePercentage]);
+
+  // Function to handle side selection (UP/DOWN)
+  const handleSelectSide = (side: Side) => {
+    setSelectedSide(side);
+    calculatePotentialProfit(side, bidAmount);
   };
 
+  // Effect to handle bid amount change
+  useEffect(() => {
+    if (selectedSide !== null && bidAmount) {
+      calculatePotentialProfit(selectedSide, bidAmount);
+    }
+  }, [bidAmount, selectedSide, calculatePotentialProfit]);
 
+  // Improved handleBid function to use selectedSide
+  const handleBid = async (side?: Side) => {
+    const bidSide = side !== undefined ? side : selectedSide;
 
+    if (bidSide === null) {
+      toast({
+        title: "Error",
+        description: "Please select UP or DOWN first",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
 
-  // Handle resolve market
-  const handleResolveMarket = async () => {
-    if (!contract) return;
-
-    try {
-      setIsResolvingMarket(true);
-
-      const result = await resolve();
-
-      if (result) {
+      // Check bidAmount
+      if (!bidAmount || isNaN(parseFloat(bidAmount)) || parseFloat(bidAmount) <= 0) {
         toast({
-          title: "Market resolved successfully",
+          title: "Error",
+          description: "Please enter a valid amount",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+
+      if (!contract || !bidAmount || parseFloat(bidAmount) <= 0) return;
+
+      try {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        const contractWithSigner = contract.connect(signer);
+
+        const bidAmountWei = ethers.utils.parseEther(bidAmount);
+
+        // Call bid function of contract with signer
+        const tx = await contractWithSigner.bid(bidSide, {
+          value: bidAmountWei,
+          gasLimit: 500000
+        });
+
+        await tx.wait();
+
+        // Update UI after bid success
+        toast({
+          title: "Bid placed successfully!",
           status: "success",
           duration: 3000,
           isClosable: true,
         });
-      }
-    } catch (error) {
-      console.error("Error resolving market:", error);
-      toast({
-        title: "Failed to resolve market",
-        description: error.message || "An unexpected error occurred",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-    } finally {
-      setIsResolvingMarket(false);
-    }
-  };
 
-  // Hàm tính toán pot.profit
-  const calculatePotentialProfit = (bidAmount: number) => {
-    if (!contract || !positions || isNaN(bidAmount) || bidAmount <= 0) {
-      setPotentialProfit({ b: 0, c: 0 });
-      return;
-    }
-
-    const totalDeposited = positions.long + positions.short; // Tổng số tiền đã đặt cược
-    const longAmount = positions.long; // Số tiền đã đặt cược ở LONG
-    const shortAmount = positions.short; // Số tiền đã đặt cược ở SHORT
-
-    // Tính toán lợi nhuận tiềm năng cho LONG
-    let longProfit = (bidAmount * totalDeposited) / (longAmount + bidAmount);
-
-    // Tính toán lợi nhuận tiềm năng cho SHORT
-    let shortProfit = (bidAmount * totalDeposited) / (shortAmount + bidAmount);
-
-    // Trừ phí (nếu có)
-    const fee = (bidAmount * Number(feePercentage) / 10);
-    longProfit -= fee;
-    shortProfit -= fee;
-
-    // Đảm bảo b < c
-    let b = Math.min(longProfit, shortProfit);
-    let c = Math.max(longProfit, shortProfit);
-    if (b < 0) {
-      b = 0;
-    }
-    setPotentialProfit({ b, c });
-  };
-
-  // Gọi hàm calculatePotentialProfit khi người dùng nhập ETH
-  const handleBidAmountChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value;
-    setBidAmount(value);
-
-    // Tính toán pot.profit
-    const numValue = parseFloat(value);
-    calculatePotentialProfit(numValue);
-  };
-
-
-
-  useEffect(() => {
-    const priceService = PriceService.getInstance();
-
-    const handlePriceUpdate = (priceData: PriceData) => {
-      setCurrentPrice(priceData.price);
-    };
-
-    // Subscribe to price updates when component mounts
-    priceService.subscribeToPriceUpdates(handlePriceUpdate, 'BTCUSDT', 5000);
-
-    // Cleanup subscription when component unmounts
-    return () => {
-      priceService.unsubscribeFromPriceUpdates(handlePriceUpdate);
-    };
-  }, []);
-
-  // Sửa lại useEffect cho price history
-  useEffect(() => {
-    const fetchPriceHistory = async () => {
-      try {
-        console.log('Fetching price history for symbol:', chartSymbol);
-        const priceService = PriceService.getInstance();
-        const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
-        setChartData(klines);
-      } catch (error) {
-        console.error("Error fetching price history:", error);
+        // Reset bid amount and refresh data
+        await refreshBalance();
+        await fetchMarketDetails();
+        resetBettingForm();
+        setBidAmount("");
+      } catch (error: any) {
+        console.error("Error placing bid:", error);
+        toast({
+          title: "Failed to place bid",
+          description: error.message || "An unexpected error occurred",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
       }
     };
 
-    fetchPriceHistory();
-    const interval = setInterval(fetchPriceHistory, 60000);
-    return () => clearInterval(interval);
-  }, [chartSymbol]);
+    const canClaimReward = useCallback(async () => {
+      if (!contract || currentPhase !== Phase.Expiry) return;
 
-  // Thêm hàm xử lý resolve và expire
-
-
-  const handleExpireMarket = async () => {
-    if (!contract) return;
-    try {
-      console.log("Attempting to expire market...");
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
-      // Hiển thị thông báo đang xử lý
-      toast({
-        title: "Expiring market...",
-        description: "Please wait while the transaction is being processed",
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      const tx = await contractWithSigner.expireMarket({
-        gasLimit: 500000
-      });
-
-      console.log("Transaction sent:", tx.hash);
-
-      // Hiển thị thông báo transaction đã được gửi
-      toast({
-        title: "Transaction sent",
-        description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      await tx.wait();
-
-      // Hiển thị thông báo thành công
-      toast({
-        title: "Market expired successfully!",
-        status: "success",
-        duration: 3000,
-        isClosable: true,
-      });
-
-      // Refresh market details
-      await fetchMarketDetails();
-
-      // Cập nhật UI ngay lập tức
-      setCurrentPhase(Phase.Expiry);
-      setCanExpire(false);
-
-      return true;
-    } catch (error: any) {
-      console.error("Error expiring market:", error);
-      toast({
-        title: "Failed to expire market",
-        description: error.message || "An unexpected error occurred",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    const loadContractData = async () => {
       try {
-        const contractAddress = localStorage.getItem('selectedContractAddress');
-        if (!contractAddress) return;
 
+
+        // Check if already claimed
+        const hasClaimed = await contract.hasClaimed(walletAddress);
+        console.log("Has claimed:", hasClaimed);
         const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const contract = new ethers.Contract(
-          contractAddress,
-          BinaryOptionMarket.abi,
-          provider
-        );
+        const signer = provider.getSigner();
+        const contractWithSigner = contract.connect(signer);
 
-        // Lấy tất cả thông tin cần thiết từ contract
+        // Get oracle details
+        const oracleDetails = await contract.oracleDetails();
+        const finalPrice = parseFloat(oracleDetails.finalPrice);
+        const strikePrice = parseFloat(oracleDetails.strikePrice);
+        console.log("Prices:", { finalPrice, strikePrice });
+
+        // Improved logic: finalPrice < strikePrice then SHORT win
+        const winningSide = finalPrice < strikePrice ? Side.Short : Side.Long;
+        console.log("Winning side:", winningSide);
+
+        // Check user's deposit
+        const userDeposit = winningSide === Side.Long ?
+          await contract.longBids(walletAddress) :
+          await contract.shortBids(walletAddress);
+        console.log("User deposit:", userDeposit.toString());
+
+        // Show claim button if:
+        // 1. Not claimed yet
+        // 2. Has deposit on winning side
+        // 3. Currently in Expiry phase
+        if (!hasClaimed && userDeposit.gt(0) && currentPhase === Phase.Expiry) {
+          setShowClaimButton(true);
+
+          // Calculate reward
+          const positions = await contract.positions();
+          const totalWinningDeposits = winningSide === Side.Long ? positions.long : positions.short;
+          const totalDeposited = positions.long.add(positions.short);
+
+          const reward = userDeposit.mul(totalDeposited).div(totalWinningDeposits);
+          const fee = reward.mul(10).div(100); // 10% fee
+          const finalReward = reward.sub(fee);
+
+          setReward(parseFloat(ethers.utils.formatEther(finalReward)));
+        } else {
+          setShowClaimButton(false);
+        }
+
+      } catch (error) {
+        console.error("Error checking claim eligibility:", error);
+        setShowClaimButton(false);
+      }
+    }, [contract, currentPhase, walletAddress]);
+
+    // Effect to check claim eligibility
+    useEffect(() => {
+      if (currentPhase === Phase.Expiry) {
+        canClaimReward();
+      }
+    }, [currentPhase, canClaimReward]);
+
+
+    const startBidding = async () => {
+      try {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        const contract = new ethers.Contract(contractAddress, BinaryOptionMarket.abi, signer);
+
+        const tx = await contract.startBidding();
+        await tx.wait();
+
+        // Update phase after transaction success
+        await fetchMarketDetails();
+
+        // Update UI immediately
+        setCurrentPhase(Phase.Bidding);
+
+        toast({
+          title: "Bidding phase started!",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
+      } catch (error: any) {
+        console.error("Failed to start bidding:", error);
+        toast({
+          title: "Failed to start bidding",
+          description: error.message,
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+    };
+
+    useEffect(() => {
+      const priceService = PriceService.getInstance();
+
+      const handlePriceUpdate = (priceData: PriceData) => {
+        setCurrentPrice(priceData.price);
+      };
+
+      // Subscribe to price updates when component mounts
+      priceService.subscribeToPriceUpdates(handlePriceUpdate, chartSymbol, 5000);
+
+      // Cleanup subscription when component unmounts
+      return () => {
+        priceService.unsubscribeFromPriceUpdates(handlePriceUpdate);
+      };
+    }, []);
+
+    // Improved useEffect for price history
+    useEffect(() => {
+      const fetchPriceHistory = async () => {
         try {
-          const [
-            positions,
-            strikePriceBN,
-            phase,
-            biddingStartTime,
-            tradingPair,
-            deployTimestamp
-          ] = await Promise.all([
-            contract.positions(),
-            contract.strikePrice(),
-            contract.currentPhase(),
-            contract.biddingStartTime(),
-            contract.tradingPair().catch(() => 'Unknown'),
-            contract.deployTime()
-          ]);
+          console.log('Fetching price history for symbol:', chartSymbol);
+          const priceService = PriceService.getInstance();
+          const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
+          setChartData(klines);
+        } catch (error) {
+          console.error("Error fetching price history:", error);
+        }
+      };
 
-          // Cập nhật states
-          setContract(contract);
-          setContractAddress(contractAddress);
-          setStrikePrice(ethers.utils.formatUnits(strikePriceBN, 0));
-          setCurrentPhase(phase);
-          setTradingPair(tradingPair);
-          setBiddingStartTime(biddingStartTime.toNumber());
-          setDeployTime(deployTimestamp.toNumber());
-          // Set chart symbol dựa trên trading pair
-          const symbol = tradingPair === "BTC/USD" ? "BTCUSDT" :
-            tradingPair === "ETH/USD" ? "ETHUSDT" :
-              tradingPair === "ICP/USD" ? "ICPUSDT" : "BTCUSDT";
-          setChartSymbol(symbol);
+      fetchPriceHistory();
+      const interval = setInterval(fetchPriceHistory, 60000);
+      return () => clearInterval(interval);
+    }, [chartSymbol]);
 
-          // Cập nhật positions
-          setPositions({
-            long: parseFloat(ethers.utils.formatEther(positions.long)),
-            short: parseFloat(ethers.utils.formatEther(positions.short))
-          });
+    // Add handleExpireMarket function
+    const handleExpireMarket = async () => {
+      if (!contract) return;
+      try {
+        console.log("Attempting to expire market...");
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        const contractWithSigner = contract.connect(signer);
+
+        // Show processing message
+        toast({
+          title: "Expiring market...",
+          description: "Please wait while the transaction is being processed",
+          status: "info",
+          duration: 5000,
+          isClosable: true,
+        });
+
+        const tx = await contractWithSigner.expireMarket({
+          gasLimit: 500000
+        });
+
+        console.log("Transaction sent:", tx.hash);
+
+        // Show transaction sent message
+        toast({
+          title: "Transaction sent",
+          description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
+          status: "info",
+          duration: 5000,
+          isClosable: true,
+        });
+
+        await tx.wait();
+
+        // Show success message
+        toast({
+          title: "Market expired successfully!",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
+
+        // Refresh market details
+        await fetchMarketDetails();
+
+        // Update UI immediately
+        setCurrentPhase(Phase.Expiry);
+        setCanExpire(false);
+
+        return true;
+      } catch (error: any) {
+        console.error("Error expiring market:", error);
+        toast({
+          title: "Failed to expire market",
+          description: error.message || "An unexpected error occurred",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+        return false;
+      }
+    };
+
+    useEffect(() => {
+      const loadContractData = async () => {
+        try {
+          const contractAddress = localStorage.getItem('selectedContractAddress');
+          if (!contractAddress) return;
+
+          const provider = new ethers.providers.Web3Provider(window.ethereum);
+          const contract = new ethers.Contract(
+            contractAddress,
+            BinaryOptionMarket.abi,
+            provider
+          );
+
+          // Get all necessary data from contract
+          try {
+            const [
+              positions,
+              strikePriceBN,
+              phase,
+              biddingStartTime,
+              tradingPair,
+              deployTimestamp,
+              feePercentage
+            ] = await Promise.all([
+              contract.positions(),
+              contract.strikePrice(),
+              contract.currentPhase(),
+              contract.biddingStartTime(),
+              contract.tradingPair().catch(() => 'Unknown'),
+              contract.deployTime(),
+              contract.feePercentage()
+            ]);
+
+            // Update states
+            setContract(contract);
+            setContractAddress(contractAddress);
+            // Get strikePrice
+            const strikePriceInteger = await contract.strikePrice();
+            // Convert from integer (BigNumber) to float for display
+            const strikePriceFormatted = (parseInt(strikePriceInteger.toString()) / STRIKE_PRICE_MULTIPLIER).toFixed(2);
+            setStrikePrice(strikePriceFormatted);
+            setCurrentPhase(phase);
+            setTradingPair(tradingPair);
+            setBiddingStartTime(biddingStartTime.toNumber());
+            setDeployTime(deployTimestamp.toNumber());
+            // Set chart symbol based on trading pair
+            const symbol = tradingPair === "BTC/USD" ? "BTCUSDT" :
+              tradingPair === "ETH/USD" ? "ETHUSDT" :
+                tradingPair === "ICP/USD" ? "ICPUSDT" : "BTCUSDT";
+            setChartSymbol(symbol);
+            console.log("Chart symbol:", symbol);
+            // Update positions
+            setPositions({
+              long: parseFloat(ethers.utils.formatEther(positions.long)),
+              short: parseFloat(ethers.utils.formatEther(positions.short))
+            });
+
+          } catch (error) {
+            console.error("Error loading contract data:", error);
+            // Set default values if there's an error
+            setTradingPair('Unknown');
+            //setChartSymbol('BTCUSDT');
+          }
 
         } catch (error) {
-          console.error("Error loading contract data:", error);
-          // Set default values nếu có lỗi
-          setTradingPair('Unknown');
-          setChartSymbol('BTCUSDT');
+          console.error("Error:", error);
         }
+      };
 
-      } catch (error) {
-        console.error("Error:", error);
-      }
+      loadContractData();
+    }, []);
+
+    // Improved useEffect for price chart
+    useEffect(() => {
+      const fetchPriceHistory = async () => {
+        try {
+          console.log('Fetching price history for symbol:', chartSymbol);
+          const priceService = PriceService.getInstance();
+          const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
+          setChartData(klines);
+        } catch (error) {
+          console.error("Error fetching price history:", error);
+        }
+      };
+
+      fetchPriceHistory();
+      const interval = setInterval(fetchPriceHistory, 60000);
+      return () => clearInterval(interval);
+    }, [chartSymbol]);
+
+    // Add near other state declarations
+    const phaseCircleProps = (phase: Phase) => {
+      // Get the color based on the phase
+      const getPhaseColor = (phase: Phase) => {
+        switch (phase) {
+          case Phase.Trading:
+            return "green.400";
+          case Phase.Bidding:
+            return "blue.400";
+          case Phase.Maturity:
+            return "orange.400";
+          case Phase.Expiry:
+            return "red.400";
+          default:
+            return "gray.400";
+        }
+      };
+
+      // Use the phase-specific color if it's the current phase,
+      // otherwise use a dimmer version
+      return {
+        bg: currentPhase === phase ? getPhaseColor(phase) : "gray.700",
+        color: currentPhase === phase ? "black" : "gray.500",
+        fontWeight: "bold",
+        zIndex: 1
+      };
     };
 
-    loadContractData();
-  }, []);
+    // resolve market
+    const resolve = async () => {
+      if (!contract) return;
 
-  // Sửa lại useEffect cho price chart
-  useEffect(() => {
-    const fetchPriceHistory = async () => {
       try {
-        console.log('Fetching price history for symbol:', chartSymbol);
-        const priceService = PriceService.getInstance();
-        const klines = await priceService.fetchKlines(chartSymbol, '1m', 100);
-        setChartData(klines);
-      } catch (error) {
-        console.error("Error fetching price history:", error);
+        console.log("Attempting to resolve market...");
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        const contractWithSigner = contract.connect(signer);
+
+        // Show processing message
+        toast({
+          title: "Resolving market...",
+          description: "Please wait while the transaction is being processed",
+          status: "info",
+          duration: 5000,
+          isClosable: true,
+        });
+
+        const tx = await contractWithSigner.resolveMarket({
+          gasLimit: 500000
+        });
+
+        console.log("Transaction sent:", tx.hash);
+
+        // Show transaction sent message
+        toast({
+          title: "Transaction sent",
+          description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
+          status: "info",
+          duration: 5000,
+          isClosable: true,
+        });
+
+        await tx.wait();
+
+        // Show success message
+        toast({
+          title: "Market resolved successfully!",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
+
+        // Refresh market details
+        await fetchMarketDetails();
+
+        // Update UI immediately
+        setCurrentPhase(Phase.Maturity);
+        setCanResolve(false);
+
+        return true;
+      } catch (error: any) {
+        console.error("Error resolving market:", error);
+        toast({
+          title: "Failed to resolve market",
+          description: error.message || "An unexpected error occurred",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+        return false;
       }
     };
 
-    fetchPriceHistory();
-    const interval = setInterval(fetchPriceHistory, 60000);
-    return () => clearInterval(interval);
-  }, [chartSymbol]);
+    // claim reward
+    const claimReward = async () => {
+      if (!contract || currentPhase !== Phase.Expiry) return;
 
-  // Add near other state declarations
-  const phaseCircleProps = (phase: Phase) => ({
-    bg: currentPhase === phase ? "#FEDF56" : "gray.700",
-    color: currentPhase === phase ? "black" : "gray.500",
-    fontWeight: "bold",
-    zIndex: 1
-  });
-
-  // Thêm hàm resolve
-  const resolve = async () => {
-    if (!contract) return;
-
-    try {
-      console.log("Attempting to resolve market...");
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
-      // Hiển thị thông báo đang xử lý
-      toast({
-        title: "Resolving market...",
-        description: "Please wait while the transaction is being processed",
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      const tx = await contractWithSigner.resolveMarket({
-        gasLimit: 500000
-      });
-
-      console.log("Transaction sent:", tx.hash);
-
-      // Hiển thị thông báo transaction đã được gửi
-      toast({
-        title: "Transaction sent",
-        description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
-        status: "info",
-        duration: 5000,
-        isClosable: true,
-      });
-
-      await tx.wait();
-
-      // Hiển thị thông báo thành công
-      toast({
-        title: "Market resolved successfully!",
-        status: "success",
-        duration: 3000,
-        isClosable: true,
-      });
-
-      // Refresh market details
-      await fetchMarketDetails();
-
-      // Cập nhật UI ngay lập tức
-      setCurrentPhase(Phase.Maturity);
-      setCanResolve(false);
-
-      return true;
-    } catch (error: any) {
-      console.error("Error resolving market:", error);
-      toast({
-        title: "Failed to resolve market",
-        description: error.message || "An unexpected error occurred",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-      return false;
-    }
-  };
-
-  // Thêm cleanup khi component unmount
-  useEffect(() => {
-    return () => {
-      if (contractAddress) {
-        // Lưu position history cuối cùng vào localStorage
-        localStorage.setItem(positionHistoryKey, JSON.stringify(positionHistory));
-      }
-    };
-  }, [contractAddress, positionHistory]);
-
-  // Thêm lại hàm claimReward
-  const claimReward = async () => {
-    if (!contract || currentPhase !== Phase.Expiry) return;
-
-    try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
-      const tx = await contractWithSigner.claimReward();
-      await tx.wait();
-
-      // Update states after successful claim
-      await Promise.all([
-        fetchMarketDetails(),
-        fetchContractBalance()
-      ]);
-
-      await refreshBalance();
-      setShowClaimButton(false);
-      setReward(0);
-
-      toast({
-        title: "Success",
-        description: "Successfully claimed reward!",
-        status: "success",
-        duration: 3000,
-      });
-
-    } catch (error) {
-      console.error("Error claiming reward:", error);
-      toast({
-        title: "Error claiming reward",
-        description: error.message,
-        status: "error",
-        duration: 3000,
-      });
-    }
-  };
-
-  // Sửa lại hàm fetchPositionHistory
-  const fetchPositionHistory = async () => {
-    if (!contract) return [];
-    try {
-      const deployTime = await contract.deployTime();
-      if (!deployTime) throw new Error("Deploy time is null");
-
-      // Lấy block hiện tại
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const currentBlock = await provider.getBlockNumber();
-
-      // Lấy tất cả events từ block 0 đến block hiện tại
-      const events = await contract.queryFilter(
-        contract.filters.PositionUpdated(),
-        0,
-        currentBlock
-      );
-
-      // Sắp xếp events theo thời gian
-      const sortedEvents = events.sort((a, b) =>
-        a.args.timestamp.toNumber() - b.args.timestamp.toNumber()
-      );
-
-      return sortedEvents.map(event => ({
-        timestamp: event.args.timestamp.toNumber(),
-        longAmount: event.args.longAmount,
-        shortAmount: event.args.shortAmount
-      }));
-    } catch (error) {
-      console.error("Error fetching position history:", error);
-      return [];
-    }
-  };
-
-  // Thêm hàm helper để tạo các điểm phụ giữa các mốc chính
-  const createIntermediatePoints = (startTime: number, endTime: number) => {
-    const points: PositionPoint[] = [];
-    const interval = 1; // 1 giây cho mỗi điểm
-    const totalPoints = Math.floor((endTime - startTime) / interval);
-
-    for (let i = 0; i <= totalPoints; i++) {
-      const timestamp = startTime + (i * interval);
-      points.push({
-        timestamp,
-        longPercentage: null,
-        shortPercentage: null,
-        isMainPoint: false,
-        isFixed: false
-      });
-    }
-    return points;
-  };
-
-  // Sửa lại useEffect xử lý position history
-  useEffect(() => {
-    if (!contract) return;
-
-    const initializePositionData = async () => {
       try {
-        const [deployTime, maturityTime] = await Promise.all([
-          contract.deployTime(),
-          contract.maturityTime()
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        const contractWithSigner = contract.connect(signer);
+
+        const tx = await contractWithSigner.claimReward();
+        await tx.wait();
+
+        // Update states after successful claim
+        await Promise.all([
+          fetchMarketDetails(),
+          fetchContractBalance()
         ]);
 
-        const startTime = deployTime.toNumber();
-        const endTime = maturityTime.toNumber();
-        const mainInterval = Math.floor((endTime - startTime) / 9);
+        await refreshBalance();
+        setShowClaimButton(false);
+        setReward(0);
 
-        // Lấy lịch sử bidding
-        const bidHistory = await fetchPositionHistory();
+        toast({
+          title: "Success",
+          description: "Successfully claimed reward!",
+          status: "success",
+          duration: 3000,
+        });
 
-        // Tạo các điểm chính và phụ
-        const allPoints = [];
-        let currentPercentages = { long: 50, short: 50 }; // Bắt đầu với 50-50
-
-        for (let i = 0; i < 10; i++) {
-          const timestamp = startTime + (mainInterval * i);
-
-          // Cập nhật tỷ lệ dựa trên lịch sử bid
-          const previousBids = bidHistory.filter(bid => bid.timestamp <= timestamp);
-          if (previousBids.length > 0) {
-            const latestBid = previousBids[previousBids.length - 1];
-            const longValue = parseFloat(ethers.utils.formatEther(latestBid.longAmount));
-            const shortValue = parseFloat(ethers.utils.formatEther(latestBid.shortAmount));
-            const total = longValue + shortValue;
-
-            if (total > 0) {
-              currentPercentages = {
-                long: (longValue / total) * 100,
-                short: (shortValue / total) * 100
-              };
-            }
-          }
-
-          // Thêm điểm chính
-          allPoints.push({
-            timestamp,
-            longPercentage: currentPercentages.long,
-            shortPercentage: currentPercentages.short,
-            isMainPoint: true,
-            isFixed: timestamp < Date.now() / 1000
-          });
-
-          // Thêm điểm phụ nếu không phải điểm cuối
-          if (i < 9) {
-            const intermediatePoints = createIntermediatePoints(
-              timestamp,
-              startTime + (mainInterval * (i + 1))
-            );
-
-            // Áp dụng tỷ lệ hiện tại cho các điểm phụ
-            intermediatePoints.forEach(point => {
-              const pointTime = point.timestamp;
-              const relevantBids = bidHistory.filter(bid => bid.timestamp <= pointTime);
-
-              if (relevantBids.length > 0) {
-                const latestBid = relevantBids[relevantBids.length - 1];
-                const longValue = parseFloat(ethers.utils.formatEther(latestBid.longAmount));
-                const shortValue = parseFloat(ethers.utils.formatEther(latestBid.shortAmount));
-                const total = longValue + shortValue;
-
-                if (total > 0) {
-                  point.longPercentage = (longValue / total) * 100;
-                  point.shortPercentage = (shortValue / total) * 100;
-                } else {
-                  point.longPercentage = 50;
-                  point.shortPercentage = 50;
-                }
-              } else {
-                point.longPercentage = 50;
-                point.shortPercentage = 50;
-              }
-
-              point.isFixed = pointTime < Date.now() / 1000;
-            });
-
-            allPoints.push(...intermediatePoints);
-          }
-        }
-
-        setPositionHistory(allPoints);
       } catch (error) {
-        console.error("Error initializing position data:", error);
+        console.error("Error claiming reward:", error);
+        toast({
+          title: "Error claiming reward",
+          description: error.message,
+          status: "error",
+          duration: 3000,
+        });
       }
     };
 
-    const handlePositionUpdate = async () => {
+    // Improved fetchPositionHistory
+    const fetchPositionHistory = useCallback(async () => {
+      if (!contract) return [];
+
+      setIsLoadingPositionHistory(true);
+
       try {
-        const positions = await contract.positions();
-        const longValue = parseFloat(ethers.utils.formatEther(positions.long));
-        const shortValue = parseFloat(ethers.utils.formatEther(positions.short));
-        const total = longValue + shortValue;
+        // Get current block
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const currentBlock = await provider.getBlockNumber();
+
+        // Get all PositionUpdated events from block 0 to current block
+        const events = await contract.queryFilter(
+          contract.filters.PositionUpdated(),
+          0,
+          currentBlock
+        );
+
+        // Sort events by time
+        const sortedEvents = events.sort((a, b) =>
+          a.args.timestamp.toNumber() - b.args.timestamp.toNumber()
+        );
+
+        // Convert to format for chart
+        const positionPoints = sortedEvents.map(event => {
+          const timestamp = event.args.timestamp.toNumber();
+          const longAmount = parseFloat(ethers.utils.formatEther(event.args.longAmount));
+          const shortAmount = parseFloat(ethers.utils.formatEther(event.args.shortAmount));
+          const total = longAmount + shortAmount;
+
+          let longPercentage = 50;
+          let shortPercentage = 50;
+
+          if (total > 0) {
+            longPercentage = (longAmount / total) * 100;
+            shortPercentage = (shortAmount / total) * 100;
+          }
+
+          return {
+            timestamp,
+            longPercentage,
+            shortPercentage,
+            isMainPoint: true,
+            isFixed: false
+          };
+        });
+
+        // Add initial point if needed
+        if (positionPoints.length === 0 && biddingStartTime) {
+          positionPoints.push({
+            timestamp: biddingStartTime,
+            longPercentage: 50,
+            shortPercentage: 50,
+            isMainPoint: true,
+            isFixed: true
+          });
+        }
+
+        setIsLoadingPositionHistory(false);
+        return positionPoints;
+      } catch (error) {
+        console.error("Error fetching position history:", error);
+        setIsLoadingPositionHistory(false);
+        return [];
+      }
+    }, [contract, biddingStartTime]);
+
+    // Improved useEffect to get position history from on-chain
+    useEffect(() => {
+      if (contract && currentPhase >= Phase.Bidding) {
+        fetchPositionHistory().then(history => {
+          if (history.length > 0) {
+            setPositionHistory(history);
+          } else if (biddingStartTime) {
+            // Fallback if no data
+            setPositionHistory(createInitialPositionHistory(biddingStartTime));
+          }
+        });
+      }
+    }, [contract, currentPhase, biddingStartTime, fetchPositionHistory]);
+
+    // Add event listener for PositionUpdated events realtime
+    useEffect(() => {
+      if (!contract || currentPhase < Phase.Bidding) return;
+
+      const handlePositionUpdate = (timestamp, longAmount, shortAmount) => {
+        const ts = timestamp.toNumber();
+        const longAmt = parseFloat(ethers.utils.formatEther(longAmount));
+        const shortAmt = parseFloat(ethers.utils.formatEther(shortAmount));
+        const total = longAmt + shortAmt;
+
+        let longPercentage = 50;
+        let shortPercentage = 50;
 
         if (total > 0) {
-          const now = Math.floor(Date.now() / 1000);
-          const longPercentage = (longValue / total) * 100;
-          const shortPercentage = (shortValue / total) * 100;
+          longPercentage = (longAmt / total) * 100;
+          shortPercentage = (shortAmt / total) * 100;
+        }
 
-          setPositionHistory(prevHistory => {
-            return prevHistory.map(point => {
-              if (point.isFixed) return point;
+        // Update positionHistory with new point
+        setPositionHistory(prev => {
+          // Update isCurrentPoint for all points
+          const updatedHistory = prev.map(point => ({
+            ...point,
+            isCurrentPoint: false
+          }));
 
-              if (point.timestamp > now) {
-                return {
-                  ...point,
-                  longPercentage: null,
-                  shortPercentage: null,
-                  isFixed: false
-                };
-              }
+          // Add new point
+          const newPoint = {
+            timestamp: ts,
+            longPercentage,
+            shortPercentage,
+            isMainPoint: true,
+            isFixed: false,
+            isCurrentPoint: true
+          };
 
-              return {
-                ...point,
-                longPercentage,
-                shortPercentage,
-                isFixed: point.timestamp < now
-              };
-            });
-          });
+          return [...updatedHistory, newPoint];
+        });
+
+        // Update positions state
+        setPositions({
+          long: longAmt,
+          short: shortAmt
+        });
+      };
+
+      // Register event listener
+      contract.on("PositionUpdated", handlePositionUpdate);
+
+      // Cleanup when component unmounts
+      return () => {
+        contract.off("PositionUpdated", handlePositionUpdate);
+      };
+    }, [contract, currentPhase]);
+
+
+    // check permission
+    const checkPermissions = async () => {
+      if (!contract || !walletAddress) return;
+
+      try {
+        // check if contract has owner() function
+        let owner;
+        try {
+          owner = await contract.owner();
+          setIsOwner(owner.toLowerCase() === walletAddress.toLowerCase());
+          console.log("Contract owner:", owner);
+          console.log("Current wallet:", walletAddress);
+          console.log("Is owner:", owner.toLowerCase() === walletAddress.toLowerCase());
+        } catch (e) {
+          console.log("Contract does not have owner() function or error occurred:", e);
+        }
+
+        // check if can call resolveMarket function
+        try {
+          // check if function exists, not actually call it
+          const resolveFunction = contract.resolveMarket;
+          console.log("resolveMarket function exists:", !!resolveFunction);
+        } catch (e) {
+          console.log("Error checking resolveMarket function:", e);
+        }
+
+        // check if can call expireMarket function
+        try {
+          // check if function exists, not actually call it
+          const expireFunction = contract.expireMarket;
+          console.log("expireMarket function exists:", !!expireFunction);
+        } catch (e) {
+          console.log("Error checking expireMarket function:", e);
         }
       } catch (error) {
-        console.error("Error handling position update:", error);
+        console.error("Error checking permissions:", error);
       }
     };
 
-    initializePositionData();
-    const interval = setInterval(handlePositionUpdate, 100);
-
-    return () => clearInterval(interval);
-  }, [contract]);
-
-  // Thêm hàm kiểm tra quyền hạn
-  const checkPermissions = async () => {
-    if (!contract || !walletAddress) return;
-
-    try {
-      // Kiểm tra xem contract có hàm owner() không
-      let owner;
-      try {
-        owner = await contract.owner();
-        setIsOwner(owner.toLowerCase() === walletAddress.toLowerCase());
-        console.log("Contract owner:", owner);
-        console.log("Current wallet:", walletAddress);
-        console.log("Is owner:", owner.toLowerCase() === walletAddress.toLowerCase());
-      } catch (e) {
-        console.log("Contract does not have owner() function or error occurred:", e);
+    // check permission when component mount
+    useEffect(() => {
+      if (contract && walletAddress) {
+        checkPermissions();
       }
+    }, [contract, walletAddress]);
 
-      // Kiểm tra xem có thể gọi hàm resolveMarket không
-      try {
-        // Chỉ kiểm tra xem hàm có tồn tại không, không thực sự gọi nó
-        const resolveFunction = contract.resolveMarket;
-        console.log("resolveMarket function exists:", !!resolveFunction);
-      } catch (e) {
-        console.log("Error checking resolveMarket function:", e);
+    const isMarketEnded = (maturityTime: any, phase: string): boolean => {
+      const currentTime = new Date();
+      const maturityDate = new Date(maturityTime * 1000);
+      return currentTime.getTime() >= maturityDate.getTime();
+    };
+
+
+    // replace logic check phase based on time
+    useEffect(() => {
+      // check and update phase based on current time
+      const checkPhaseBasedOnTime = () => {
+        const now = getCurrentTimestamp();
+
+        if (currentPhase === Phase.Bidding && now >= maturityTime) {
+          setCanResolve(true);
+        }
+
+        if (currentPhase === Phase.Maturity && resolveTime > 0 && now >= resolveTime + 30) {
+          setCanExpire(true);
+        }
+      };
+
+      checkPhaseBasedOnTime();
+      const interval = setInterval(checkPhaseBasedOnTime, 1000);
+      return () => clearInterval(interval);
+    }, [currentPhase, maturityTime, resolveTime]);
+
+    // Calculate long and short percentages
+    const longPercentage = useMemo(() => {
+      const total = positions.long + positions.short;
+      return total > 0 ? (positions.long / total) * 100 : 50;
+    }, [positions]);
+
+    const shortPercentage = useMemo(() => {
+      const total = positions.long + positions.short;
+      return total > 0 ? (positions.short / total) * 100 : 50;
+    }, [positions]);
+
+
+    const formatMaturityTime = (timestamp: number): string => {
+      if (!timestamp) return 'Pending';
+      return format(new Date(timestamp * 1000), 'MMM dd, yyyy HH:mm');
+    };
+
+    // Handle time range changes
+    const handleTimeRangeChange = (range: string, chartType: 'price' | 'position') => {
+      if (chartType === 'price') {
+        setPriceTimeRange(range);
+      } else {
+        setPositionTimeRange(range);
       }
+    };
+    // Handle resolve market
+    const handleResolveMarket = async () => {
+      if (!contract) return;
 
-      // Kiểm tra xem có thể gọi hàm expireMarket không
       try {
-        // Chỉ kiểm tra xem hàm có tồn tại không, không thực sự gọi nó
-        const expireFunction = contract.expireMarket;
-        console.log("expireMarket function exists:", !!expireFunction);
-      } catch (e) {
-        console.log("Error checking expireMarket function:", e);
+        setIsResolvingMarket(true);
+
+        const result = await resolve();
+
+        if (result) {
+          toast({
+            title: "Market resolved successfully",
+            status: "success",
+            duration: 3000,
+            isClosable: true,
+          });
+        }
+      } catch (error) {
+        console.error("Error resolving market:", error);
+        toast({
+          title: "Failed to resolve market",
+          description: error.message || "An unexpected error occurred",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+      } finally {
+        setIsResolvingMarket(false);
       }
-    } catch (error) {
-      console.error("Error checking permissions:", error);
-    }
-  };
+    };
 
-  // Gọi hàm kiểm tra quyền hạn khi component mount
-  useEffect(() => {
-    if (contract && walletAddress) {
-      checkPermissions();
-    }
-  }, [contract, walletAddress]);
+    // call calculatePotentialProfit when user input ETH
+    const handleBidAmountChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setBidAmount(value);
 
-  const isMarketEnded = (maturityTime: any, phase: string): boolean => {
-    const currentTime = new Date();
-    const maturityDate = new Date(maturityTime * 1000);
-    return currentTime.getTime() >= maturityDate.getTime();
-  };
+      // calculate potential profit
+      const numValue = parseFloat(value);
+      calculatePotentialProfit(selectedSide, value);
+    };
 
-  return (
-    <Box bg="black" minH="100vh">
-      {/* Header Section */}
-      <Flex px={6} py={4} alignItems="center">
-        <Button
-          leftIcon={<FaChevronLeft />}
-          variant="ghost"
-          color="#FEDF56"
-          onClick={() => router.push('/listaddress')}
-          _hover={{ bg: 'rgba(254, 223, 86, 0.1)' }}
-        >
-          Markets
-        </Button>
+    // load contract data from localStorage when component mount
+    useEffect(() => {
+      // check if contract data in localStorage
+      const cachedData = localStorage.getItem('contractData');
+
+      if (cachedData) {
+        try {
+          const parsedData = JSON.parse(cachedData);
+          const timestamp = parsedData.timestamp || 0;
+          const now = Date.now();
+
+          // only use cache data if it was saved in the last 5 minutes
+          if (now - timestamp < 5 * 60 * 1000) {
+            console.log("Using cached contract data");
+
+            // update trading pair and chart symbol
+            if (parsedData.tradingPair) {
+              setTradingPair(parsedData.tradingPair);
+              const formattedSymbol = getChartSymbolFromTradingPair(parsedData.tradingPair);
+              setChartSymbol(formattedSymbol);
+            }
+
+            // update state from cache data
+            setStrikePrice(parsedData.strikePrice.toString());
+            setMaturityTime(parseInt(parsedData.maturityTime));
+            setCurrentPhase(parseInt(parsedData.phase));
+
+            // update positions if have
+            if (parsedData.longAmount && parsedData.shortAmount) {
+              setPositions({
+                long: parseFloat(parsedData.longAmount),
+                short: parseFloat(parsedData.shortAmount)
+              });
+            }
+
+            // mark as loaded initial data
+            setIsLoadingContractData(false);
+          }
+        } catch (error) {
+          console.error("Error parsing cached contract data:", error);
+        }
+      }
+    }, []);
+
+    // load contract data from blockchain
+    useEffect(() => {
+      const fetchContractData = async () => {
+        if (!contract) return;
+
+        try {
+          // if have data from cache, mark as loading new data in background
+          const isBackgroundUpdate = !isLoadingContractData;
+
+          if (!isBackgroundUpdate) {
+            setIsLoadingContractData(true);
+          }
+
+          // load all needed data in parallel
+          const [
+            strikePriceResult,
+            maturityTimeResult,
+            tradingPairResult,
+            currentPhaseResult,
+            biddingStartTimeResult,
+            feePercentageResult,
+            positionsResult
+          ] = await Promise.all([
+            contract.strikePrice(),
+            contract.maturityTime(),
+            contract.tradingPair(),
+            contract.currentPhase(),
+            contract.biddingStartTime(),
+            contract.feePercentage(),
+            contract.positions()
+          ]);
+
+          // process result
+          const strikePrice = parseFloat(ethers.utils.formatEther(strikePriceResult));
+          const maturityTime = maturityTimeResult.toNumber();
+          const tradingPair = tradingPairResult;
+          const currentPhase = currentPhaseResult;
+          const biddingStartTime = biddingStartTimeResult.toNumber();
+          const feePercentage = feePercentageResult.toNumber();
+
+          // update state
+          setStrikePrice(strikePrice.toString());
+          setMaturityTime(maturityTime);
+          setTradingPair(tradingPair);
+          setCurrentPhase(currentPhase);
+          setBiddingStartTime(biddingStartTime);
+          setFeePercentage(feePercentage);
+
+          // update positions
+          setPositions({
+            long: parseFloat(ethers.utils.formatEther(positionsResult.long)),
+            short: parseFloat(ethers.utils.formatEther(positionsResult.short))
+          });
+
+          // save new data to localStorage for future use
+          localStorage.setItem('contractData', JSON.stringify({
+            address: contract.address,
+            strikePrice: strikePrice.toString(),
+            maturityTime: maturityTime.toString(),
+            tradingPair: tradingPair,
+            phase: currentPhase.toString(),
+            longAmount: ethers.utils.formatEther(positionsResult.long),
+            shortAmount: ethers.utils.formatEther(positionsResult.short),
+            owner: await contract.owner(),
+            timestamp: Date.now()
+          }));
+
+        } catch (error) {
+          console.error("Error fetching contract data:", error);
+          toast({
+            title: "Error loading contract data",
+            description: error.message || "An unexpected error occurred",
+            status: "error",
+            duration: 5000,
+            isClosable: true,
+          });
+        } finally {
+          setIsLoadingContractData(false);
+        }
+      };
+
+      fetchContractData();
+    }, [contract]);
+
+    // Add this function to reset the betting form
+    const resetBettingForm = () => {
+      setSelectedSide(null);
+      setBidAmount("");
+      setPotentialProfit(0);
+      setProfitPercentage(0);
+    };
+
+    // check owner
+    const checkOwner = async () => {
+      try {
+        if (!contract) return;
+
+        const ownerAddress = await contract.owner();
+        setContractOwner(ownerAddress);
+
+        // check if current wallet address is owner
+        if (walletAddress) {
+          setIsOwner(walletAddress.toLowerCase() === ownerAddress.toLowerCase());
+        } else {
+          setIsOwner(false);
+        }
+      } catch (error) {
+        console.error("Error checking owner:", error);
+        setIsOwner(false);
+      }
+    };
+
+    // check owner when contract or walletAddress changes
+    useEffect(() => {
+      if (contract && walletAddress) {
+        checkOwner();
+      }
+    }, [contract, walletAddress]);
+
+    return (
+      <Box bg="black" minH="100vh">
+        {/* Header Section */}
+        <Flex px={6} py={4} alignItems="center">
+          <Button
+            leftIcon={<FaChevronLeft />}
+            variant="ghost"
+            color="#FEDF56"
+            onClick={() => router.push('/listaddress')}
+            _hover={{ bg: 'rgba(254, 223, 86, 0.1)' }}
+          >
+            Markets
+          </Button>
 
 
-        <HStack spacing={6} ml="auto" color="#FEDF56">
-          <Icon as={FaWallet} />
-          <Text> Wallet Address: {walletAddress ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}` : 'Not Connected'}</Text>
-          <Icon as={FaCoins} />
-          <Text>Balance: {Number(balance).toFixed(4)} ETH</Text>
-        </HStack>
-      </Flex>
+          <HStack spacing={6} ml="auto" color="#FEDF56">
+            <Icon as={FaWallet} />
+            <Text> Wallet Address: {walletAddress ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}` : 'Not Connected'}</Text>
+            <Icon as={FaCoins} />
+            <Text>Balance: {Number(balance).toFixed(4)} ETH</Text>
+          </HStack>
+        </Flex>
 
-      {/* Dòng thứ hai - Thông tin về thị trường */}
-      <Box display="flex" alignItems="center" mb={6} ml={6}>
-        <HStack>
-          {/* Hình ảnh Coin */}
-          <Image
-            src={`/images/${tradingPair.split('/')[0].toLowerCase()}-logo.png`}
-            alt={tradingPair}
-            boxSize="50px"
-            mr={4}
-          />
+        {/* Second line - Market Info */}
+        <Box display="flex" alignItems="center" mb={6} ml={6}>
+          <HStack>
+            {/* Coin Image */}
+            {isLoadingContractData ? (
+              <Skeleton boxSize="50px" mr={4} />
+            ) : (
+              <Image
+                src={`/images/${tradingPair.split('/')[0].toLowerCase()}-logo.png`}
+                alt={tradingPair}
+                boxSize="50px"
+                mr={4}
+              />
+            )}
 
-          <Box>
-            <Heading size="md" fontSize="30px">
-              <HStack>
-                <Text color="#FEDF56" fontSize="30px">
-                  {tradingPair}
-                </Text>
-                <Text color="white" fontSize="25px">
-                  will reach ${strikePrice} by {formatMaturityTime(maturityTime)}
-                </Text>
+            <Box>
+              <Heading size="md" fontSize="30px">
+                <HStack>
+                  {isLoadingContractData ? (
+                    <Skeleton height="30px" width="200px" />
+                  ) : (
+                    <>
+                      <Text color="#FEDF56" fontSize="30px">
+                        {tradingPair}
+                      </Text>
+                      <Text color="white" fontSize="25px">
+                        will reach ${strikePrice} by {formatMaturityTime(maturityTime)}
+                      </Text>
+                    </>
+                  )}
+                </HStack>
+              </Heading>
+              <HStack spacing={2}>
+                {isLoadingContractData ? (
+                  <Skeleton height="20px" width="300px" />
+                ) : (
+                  <>
+                    <HStack color="gray.400">
+                      <PiChartLineUpLight />
+                      <Text color="gray.400" fontSize="sm">
+                        {totalDeposited.toFixed(2)} ETH |
+                      </Text>
+                    </HStack>
+                    <HStack color="gray.400">
+                      <FaRegClock />
+                      <Text color="gray.400" fontSize="sm">
+                        {formatMaturityTime(maturityTime)} |
+                      </Text>
+                    </HStack>
+                    <HStack color="gray.400">
+                      <GrInProgress />
+                      <Text color="gray.400" fontSize="sm">
+                        Phase: {Phase[currentPhase]}
+                      </Text>
+                    </HStack>
+                  </>
+                )}
               </HStack>
-            </Heading>
-            <HStack spacing={2}>
-              <HStack color="gray.400">
-                <PiChartLineUpLight />
-                <Text color="gray.400" fontSize="sm">
-                  {totalDeposited.toFixed(2)} ETH |
-                </Text>
-              </HStack>
-              <HStack color="gray.400">
-                <FaRegClock />
-                <Text color="gray.400" fontSize="sm">
-                  {formatMaturityTime(maturityTime)} |
-                </Text>
-              </HStack>
-              <HStack color="gray.400">
-                <GrInProgress />
-                <Text color="gray.400" fontSize="sm">
-                  Phase: {Phase[currentPhase]}
-                </Text>
-              </HStack>
-            </HStack>
-          </Box>
-          {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
-            <Box
-              border="1px solid #FEDF56"
-              borderRadius="md"
-              p={3}
-              mb={4}
-              textAlign="center"
-              ml="100px"
-              textColor="white"
-            >
-              <Text fontWeight="bold">Result: {marketResult}</Text>
             </Box>
-          )}
-        </HStack>
-      </Box>
-
-
-      {/* Main Content */}
-      <Flex direction={{ base: 'column', md: 'row' }} gap={6}>
-        {/* Left Side - Charts and Rules */}
-        <Box width={{ base: '100%', md: '80%' }} pr={{ base: 0, md: 4 }} ml={4}>
-          <Tabs variant="line" colorScheme="yellow">
-            <TabList>
-              <Tab>Price Chart</Tab>
-              <Tab>Position Chart</Tab>
-            </TabList>
-
-            <TabPanels>
-              <TabPanel p={0} pt={4}>
-                <Box position="relative" width="100%">
-                  <MarketCharts
-                    chartSymbol={chartSymbol}
-                    strikePrice={parseFloat(strikePrice) || 0}
-                    timeRange={priceTimeRange}
-                    chartData={chartData}
-                    positionHistory={[]}
-                    positions={userPositions}
-                    chartType="price"
-                    onTimeRangeChange={handleTimeRangeChange}
-                    options={{
-                      showPrice: true,
-                      showPositions: false,
-                    }}
-                  />
-                </Box>
-              </TabPanel>
-
-              <TabPanel p={0} pt={4}>
-                <MarketCharts
-                  chartSymbol={chartSymbol}
-                  strikePrice={parseFloat(strikePrice) || 0}
-                  timeRange={positionTimeRange}
-                  chartData={[]}
-                  positionHistory={positionHistory}
-                  positions={positions}
-                  chartType="position"
-                  onTimeRangeChange={handleTimeRangeChange}
-                  biddingStartTime={biddingStartTime || Math.floor(Date.now() / 1000) - 3600}
-                  maturityTime={maturityTime || Math.floor(Date.now() / 1000) + 3600}
-                />
-              </TabPanel>
-            </TabPanels>
-          </Tabs>
-
-          <Box mt={8} border="1px solid #2D3748" borderRadius="xl" p={4}>
-            <Heading size="md" mb={4} color="#F0F8FF">Rules:</Heading>
-            <Text color="gray.400" mb={3}>
-              This is a binary option market where users can place bids on whether the price will be above (LONG) or below (SHORT) the strike price: {strikePrice} USD at maturity. The market goes through four phases: Trading, Bidding, Maturity, and Expiry.
-            </Text>
-            <Text color="gray.400" mb={3}>
-              During the Trading phase, users can view the market but cannot place bids. In the Bidding phase, users can place LONG or SHORT bids. At Maturity, the final price is determined and winners can claim their rewards. In the Expiry phase, the market is closed and all rewards are distributed.
-            </Text>
-            <Text color="gray.400" mb={3}>
-              The potential profit depends on the ratio of LONG to SHORT bids. If more users bet against you, your potential profit increases. A fee of {Number(feePercentage) / 10}% is charged on all bids to maintain the platform.
-            </Text>
-            <Text color="gray.400">
-              Price data is sourced from cryptocurrency exchanges to ensure accurate and reliable market prices.
-            </Text>
-            <Box display="flex" alignItems="center" fontSize="lg">
-              <Text color="white">Learn more at</Text>
-              <Image src="/images/coinbase.png" alt="Coinbase" boxSize="15px" display="inline" mx={1} />
-              <Link href="https://www.coinbase.com/explore" isExternal color="blue.400" display="flex" alignItems="center">
-                Coinbase
-                <FaExternalLinkAlt style={{ marginLeft: '5px', fontSize: '12px', verticalAlign: 'middle' }} />
-              </Link>
-            </Box>
-
-          </Box>
+            {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
+              <Box
+                border="1px solid #FEDF56"
+                borderRadius="md"
+                p={3}
+                mb={4}
+                textAlign="center"
+                ml="100px"
+                textColor="white"
+              >
+                <Text fontWeight="bold">Result: {marketResult}</Text>
+              </Box>
+            )}
+          </HStack>
         </Box>
 
-        {/* Right Side - Bid Panel and Market Info */}
 
-        <Box width={{ base: '100%', md: '20%' }} mr={4}>
-          {/* Strike Price */}
-          <Box
-            bg="gray.800"
-            p={4}
-            borderRadius="xl"
-            mb={4}
-            borderWidth={1}
-            borderColor="gray.700"
-          >
-            <Flex justify="space-between" align="center" textAlign="center" fontSize="20px" color="#FEDF56">
-              <HStack justify="center" align="center">
-                <Text color="gray.400">Strike Price: </Text>
-                <Text fontWeight="bold">{strikePrice} USD</Text>
-              </HStack>
-            </Flex>
+        {/* Main Content */}
+        <Flex direction={{ base: 'column', md: 'row' }} gap={6}>
+          {/* Left Side - Charts and Rules */}
+          <Box width={{ base: '100%', md: '80%' }} pr={{ base: 0, md: 4 }} ml={4}>
+            <Tabs variant="line" colorScheme="yellow">
+              <TabList>
+                <Tab>Price Chart</Tab>
+                <Tab>Position Chart</Tab>
+              </TabList>
 
-            {/* Show Final Price in Maturity and Expiry phases */}
-            {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
-              <Flex justify="space-between" align="center" mt={2}>
-                <Text color="gray.400">Final Price:</Text>
-                <Text fontWeight="bold">{finalPrice} USD</Text>
+              <TabPanels>
+                <TabPanel p={0} pt={4}>
+                  <Box position="relative" width="100%">
+                    <MarketCharts
+                      chartData={chartData}
+                      positionHistory={positionHistory}
+                      positions={positions}
+                      strikePrice={parseFloat(strikePrice)}
+                      timeRange={priceTimeRange}
+                      chartType="price"
+                      onTimeRangeChange={handleTimeRangeChange}
+                      chartSymbol={chartSymbol}
+                      biddingStartTime={biddingStartTime}
+                      maturityTime={maturityTime}
+                      enhancedPositionData={enhancedPositionData}
+                      setEnhancedPositionData={setEnhancedPositionData}
+                    />
+                  </Box>
+                </TabPanel>
+
+                <TabPanel p={0} pt={4}>
+                  <MarketCharts
+                    chartData={[]}
+                    positionHistory={positionHistory}
+                    positions={positions}
+                    strikePrice={parseFloat(strikePrice)}
+                    timeRange={positionTimeRange}
+                    chartType="position"
+                    onTimeRangeChange={handleTimeRangeChange}
+                    chartSymbol={chartSymbol}
+                    biddingStartTime={biddingStartTime}
+                    maturityTime={maturityTime}
+                  />
+                </TabPanel>
+              </TabPanels>
+            </Tabs>
+
+            <Box mt={8} border="1px solid #2D3748" borderRadius="xl" p={4}>
+              <Flex justify="space-between" align="center" onClick={() => setShowRules(!showRules)} cursor="pointer">
+                <Heading size="md" color="#F0F8FF" fontSize="25px">Rules</Heading>
+                <Icon as={showRules ? ChevronUpIcon : ChevronDownIcon} color="gray.400" boxSize="30px" />
               </Flex>
-            )}
-          </Box>
 
-          <Box
-            bg="gray.800"
-            p={4}
-            borderRadius="xl"
-            mb={4}
-            borderWidth={1}
-            borderColor="gray.700"
-          >
-            {/* Tỷ lệ LONG/SHORT */}
-            <Flex
-              align="center"
-              w="100%"
-              h="25px"
-              borderRadius="full"
-              bg="gray.800"
-              border="1px solid"
-              borderColor="gray.600"
-              position="relative"
-              overflow="hidden"
-              boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
-              mb={4}
-            >
-              {/* LONG Section */}
-              <Box
-                width={`${longPercentage}%`}
-                bgGradient="linear(to-r, #0f0c29, #00ff87)"
-                transition="width 0.6s ease"
-                h="full"
-                display="flex"
-                alignItems="center"
-                justifyContent="flex-end"
-                pr={3}
-                position="relative"
-                zIndex={1}
-              >
-                {longPercentage > 8 && (
-                  <Text
-                    fontSize="sm"
-                    fontWeight="bold"
-                    color="whiteAlpha.800"
-                  >
-                    {longPercentage.toFixed(0)}%
+              {showRules && (
+                <Box mt={4}>
+                  <Text color="gray.400" mb={3}>
+                    This is a binary option market where users can place bids on whether the price of {tradingPair} will be above (LONG) or below (SHORT) the strike price: {strikePrice} USD at maturity.
                   </Text>
-                )}
-              </Box>
 
-              {/* SHORT Section (in absolute layer for smooth overlap) */}
-              <Box
-                position="absolute"
-                right="0"
-                top="0"
-                h="100%"
-                width={`${shortPercentage}%`}
-                bgGradient="linear(to-r, #ff512f, #dd2476)"
-                transition="width 0.6s ease"
-                display="flex"
-                alignItems="center"
-                justifyContent="flex-start"
-                pl={3}
-                zIndex={0}
-              >
-                {shortPercentage > 8 && (
-                  <Text
-                    fontSize="sm"
-                    fontWeight="bold"
-                    color="whiteAlpha.800"
-                  >
-                    {shortPercentage.toFixed(0)}%
+                  <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Market Phases:</Text>
+                  <UnorderedList color="gray.400" spacing={2} pl={5} mb={4}>
+                    <ListItem><strong>Trading Phase:</strong> The market is visible but not yet open for bidding.</ListItem>
+                    <ListItem><strong>Bidding Phase:</strong> Users can place LONG/SHORT bids with ETH.</ListItem>
+                    <ListItem><strong>Maturity Phase:</strong> The final price is determined and the market outcome is resolved.</ListItem>
+                    <ListItem><strong>Expiry Phase:</strong> Winners can claim rewards proportional to their bid amount.</ListItem>
+                  </UnorderedList>
+
+                  <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Yes/No Criteria:</Text>
+                  <UnorderedList color="gray.400" spacing={2} pl={5} mb={4}>
+                    <ListItem>Resolves to <strong>"Yes"</strong> (LONG wins) if the final price is strictly above {strikePrice} USD at maturity time.</ListItem>
+                    <ListItem>Resolves to <strong>"No"</strong> (SHORT wins) if the final price is {strikePrice} USD or below at maturity time.</ListItem>
+                  </UnorderedList>
+
+                  <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Resolution:</Text>
+                  <UnorderedList color="gray.400" spacing={2} pl={5} mb={4}>
+                    <ListItem>We will use the Orally oracle price feed at the exact maturity time: {new Date(maturityTime * 1000).toLocaleString()}.</ListItem>
+                    <ListItem>Specifically, we will look at the closing USD value of {tradingPair} at that exact minute.</ListItem>
+                    <ListItem>If the price is strictly above {strikePrice} USD, the market resolves as <strong>"Yes"</strong>. Otherwise, it resolves as <strong>"No"</strong>.</ListItem>
+                  </UnorderedList>
+
+                  <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Profit Calculation:</Text>
+                  <Text color="gray.400" mb={3}>
+                    Your potential profit depends on the ratio between LONG and SHORT bids. If most users bet against your position, your potential profit increases. A fee of {Number(feePercentage) / 10}% is charged on winning positions.
                   </Text>
-                )}
-              </Box>
-            </Flex>
 
-            <HStack spacing={4} mb={3} ml={2} mr={2}>
-              <Button
-                border="1px solid"
-                borderColor="gray.300"
-                borderRadius="20px"
-                colorScheme="gray"
-                bg="gray.600"
-                width="50%"
-                onClick={() => handleBid(Side.Long)}
-                isLoading={isResolving}
-                loadingText="Bidding..."
-                leftIcon={<FaArrowUp />}
-                textColor="#28a745"
-                textShadow="1px 1px 12px rgba(40, 167, 69, 0.7)"
-                isDisabled={!isConnected || parseFloat(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
-                _hover={{
-                  bg: "gray.700",
-                  boxShadow: "0 4px 8px rgba(40, 167, 69, 0.2)",
-                }}
-                _active={{
-                  bg: "gray.800",
-                  transform: "scale(0.98)",
-                }}
-              >
-                UP
-              </Button>
-              <Button
-                border="1px solid"
-                borderColor="gray.300"
-                borderRadius="20px"
-                colorScheme="gray"
-                bg="gray.600"
-                textColor="#dc3545"
-                textShadow="1px 1px 12px rgba(220, 53, 69, 0.7)"
-                width="50%"
-                onClick={() => handleBid(Side.Short)}
-                isLoading={isResolving}
-                loadingText="Bidding..."
-                leftIcon={<FaArrowDown />}
-                isDisabled={!isConnected || parseFloat(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
-                _hover={{
-                  bg: "gray.700",
-                  boxShadow: "0 4px 8px rgba(220, 53, 69, 0.2)",
-                }}
-                _active={{
-                  bg: "gray.800",
-                  transform: "scale(0.98)",
-                }}
-              >
-                DOWN
-              </Button>
-            </HStack>
+                  <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Cancellation (Invalidity) Conditions:</Text>
+                  <UnorderedList color="gray.400" spacing={2} pl={5} mb={4}>
+                    <ListItem>If the price feed is unavailable at the resolution time.</ListItem>
+                    <ListItem>If market data is not available at the resolution time.</ListItem>
+                    <ListItem>Any other circumstance that makes resolution impossible or unreliable.</ListItem>
+                  </UnorderedList>
+                  <Text color="gray.400" mb={4}>
+                    If the market is canceled, participants can withdraw their full bid amount without any fees.
+                  </Text>
 
-
-            {/* Bidding */}
-            <FormControl mb={2} mt={6} color="white">
-              <FormLabel>You're betting</FormLabel>
-              <Input
-                placeholder="0.0000"
-                value={bidAmount}
-                onChange={e => setBidAmount(e.target.value)}
-                onChange={handleBidAmountChange}
-                mb={2}
-                isDisabled={currentPhase !== Phase.Bidding}
-              />
-            </FormControl>
-
-            <HStack spacing={2} mt={1} mb={4} ml={2} mr={2} alignItems="center" justifyContent="center">
-              <Button
-                width="180px"
-                alignItems="center"
-                justifyContent="center"
-                bg="#3131f7"
-                color="white"
-                _hover={{ bg: "#0000f7" }}
-              >
-                Betting to rich
-              </Button>
-            </HStack>
-
-            <Flex justify="space-between" mb={4}>
-              <Text color="gray.400">Pot. profit:</Text>
-              <Text color="white">
-                {potentialProfit.b.toFixed(4)} -> {potentialProfit.c.toFixed(4)} ETH
-              </Text>
-            </Flex>
-            <Flex justify="space-between" mb={4}>
-              <Text color="gray.400">Fee:</Text>
-              <Text color="white">{Number(feePercentage) / 10}%</Text>
-            </Flex>
-
-            {/* Your Position */}
-            <Text fontSize="lg" fontWeight="bold" mb={3} color="#FEDF56">Your Position</Text>
-            <Flex justify="space-between" mb={2}>
-              <Text color="green.400">LONG:</Text>
-              <Text color="white">{userPositions.long.toFixed(4)} ETH</Text>
-            </Flex>
-            <Flex justify="space-between">
-              <Text color="red.400">SHORT:</Text>
-              <Text color="white">{userPositions.short.toFixed(4)} ETH</Text>
-            </Flex>
-          </Box>
-          <Box p={4} borderRadius="xl" mb={4} borderWidth={1} borderColor="gray.700">
-            <Text fontSize="lg" fontWeight="bold" mb={3} color="white">
-              My Holdings
-            </Text>
-            <Button
-              variant="ghost"
-              color="#4169e1"
-              onClick={() => router.push('/owner')}
-              rightIcon={<FaChevronRight />}
-              _hover={{ bg: 'rgba(254, 223, 86, 0.1)' }}
-            >
-              Make your first Prediction Market
-            </Button>
+                  {/* Resolution Source Box */}
+                  <Box
+                    mt={4}
+                    p={3}
+                    //bg="gray.800"
+                    borderRadius="md"
+                    border="1px solid"
+                    borderColor="gray.700"
+                  >
+                    <Flex align="center" fontSize="25px" fontWeight="bold">
+                      <Image src="/images/coinbase.png" alt="Coinbase" boxSize="50px" display="inline" mx={1} borderRadius="full" mr={6} />
+                      <Box>
+                        <Text color="gray.400" fontSize="lg">Resolution Source</Text>
+                        <Link color="blue.400" href="https://www.coinbase.com" isExternal>
+                          Coinbase
+                        </Link>
+                      </Box>
+                    </Flex>
+                  </Box>
+                </Box>
+              )}
+            </Box>
           </Box>
 
-          {/* Market Timeline */}
-          <Box
-            bg="#21201d" // Màu nền cho box lớn
-            p={4}
-            borderRadius="xl"
-            borderWidth={1}
-            borderColor="gray.700"
-            borderRadius="30px"
-            boxShadow="md"
-            position="relative" // Để cho box con có thể đè lên
-            height="282px"
-          >
-            <Text fontSize="lg" fontWeight="bold" mb={4} color="#FEDF56" textAlign="center">
-              Market is Live
-            </Text>
+          {/* Right Side - Bid Panel and Market Info */}
 
+          <Box width={{ base: '100%', md: '20%' }} mr={4}>
+            {/* Strike Price */}
             <Box
-              bg="gray.800" // Màu nền cho box chứa các phase
+              bg="gray.800"
               p={4}
               borderRadius="xl"
+              mb={4}
+              borderWidth={1}
+              borderColor="gray.700"
+            >
+              <Flex justify="space-between" align="center" textAlign="center" fontSize="20px" color="#FEDF56">
+                <HStack justify="center" align="center">
+                  <Text color="gray.400">Strike Price: </Text>
+                  <Text fontWeight="bold">{strikePrice} USD</Text>
+                </HStack>
+              </Flex>
+
+              {/* Show Final Price in Maturity and Expiry phases */}
+              {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
+                <Flex justify="space-between" align="center" mt={2} textAlign="center" fontSize="20px" color="#FEDF56">
+                  <Text color="gray.400">Final Price: </Text>
+                  <Text fontWeight="bold" color="white">{finalPrice} USD</Text>
+                </Flex>
+              )}
+
+              {reward > 0 && currentPhase === Phase.Expiry && (
+                <Button
+                  onClick={claimReward}
+                  colorScheme="yellow"
+                  bg="#FEDF56"
+                  color="white"
+                  _hover={{ bg: "#FFE56B" }}
+                  isDisabled={reward === 0}
+                  width="100%"
+                  mt={4}
+                >
+                  Claim {reward.toFixed(4)} ETH
+                </Button>
+              )}
+            </Box>
+
+            <Box
+              bg="gray.800"
+              p={4}
+              borderRadius="xl"
+              mb={4}
+              borderWidth={1}
+              borderColor="gray.700"
+            >
+              {/* LONG/SHORT Ratio */}
+              <Flex
+                align="center"
+                w="100%"
+                h="25px"
+                borderRadius="full"
+                bg="gray.800"
+                border="1px solid"
+                borderColor="gray.600"
+                position="relative"
+                overflow="hidden"
+                boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                mb={4}
+              >
+                {/* LONG Section */}
+                <Box
+                  width={`${longPercentage}%`}
+                  bgGradient="linear(to-r, #0f0c29, #00ff87)"
+                  transition="width 0.6s ease"
+                  h="full"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-end"
+                  pr={3}
+                  position="relative"
+                  zIndex={1}
+                >
+                  {longPercentage > 8 && (
+                    <Text
+                      fontSize="sm"
+                      fontWeight="bold"
+                      color="whiteAlpha.800"
+                    >
+                      {longPercentage.toFixed(0)}%
+                    </Text>
+                  )}
+                </Box>
+
+                {/* SHORT Section (in absolute layer for smooth overlap) */}
+                <Box
+                  position="absolute"
+                  right="0"
+                  top="0"
+                  h="100%"
+                  width={`${shortPercentage}%`}
+                  bgGradient="linear(to-r, #ff512f, #dd2476)"
+                  transition="width 0.6s ease"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-start"
+                  pl={3}
+                  zIndex={0}
+                >
+                  {shortPercentage > 8 && (
+                    <Text
+                      fontSize="sm"
+                      fontWeight="bold"
+                      color="whiteAlpha.800"
+                    >
+                      {shortPercentage.toFixed(0)}%
+                    </Text>
+                  )}
+                </Box>
+              </Flex>
+
+              <HStack spacing={4} mb={3} ml={2} mr={2}>
+                <Button
+                  border="1px solid"
+                  borderColor="gray.300"
+                  borderRadius="20px"
+                  colorScheme="gray"
+                  bg="gray.800"
+                  width="50%"
+                  onClick={() => handleSelectSide(Side.Long)}
+                  leftIcon={<FaArrowUp />}
+                  textColor="#28a745"
+                  textShadow="1px 1px 12px rgba(40, 167, 69, 0.7)"
+                  isDisabled={!isConnected || currentPhase !== Phase.Bidding}
+                  _hover={{
+                    bg: "gray.700",
+                    boxShadow: "0 4px 8px rgba(220, 53, 69, 0.2)",
+                  }}
+                  _active={{
+                    bg: "#cececc",
+                  }}
+                  isActive={selectedSide === Side.Long}
+                >
+                  UP
+                </Button>
+                <Button
+                  border="1px solid"
+                  borderColor="gray.300"
+                  borderRadius="20px"
+                  colorScheme="gray"
+                  bg="gray.800"
+                  width="50%"
+                  onClick={() => handleSelectSide(Side.Short)}
+                  leftIcon={<FaArrowDown />}
+                  textColor="#dc3545"
+                  textShadow="1px 1px 12px rgba(220, 53, 69, 0.7)"
+                  isDisabled={!isConnected || currentPhase !== Phase.Bidding}
+                  _hover={{
+                    bg: "gray.700",
+                    boxShadow: "0 4px 8px rgba(220, 53, 69, 0.2)",
+                  }}
+                  _active={{
+                    bg: "#cececc",
+                  }}
+                  isActive={selectedSide === Side.Short}
+                >
+                  DOWN
+                </Button>
+              </HStack>
+
+
+              {/* Bidding */}
+              <FormControl mb={2} mt={6} color="white">
+                <FormLabel>You're betting</FormLabel>
+                <Input
+                  placeholder="Enter amount in ETH"
+                  bg="gray.800"
+                  color="white"
+                  borderColor="gray.600"
+                  borderRadius="md"
+                  mb={3}
+                  ml={2}
+                  mr={2}
+                  value={bidAmount}
+                  onChange={handleBidAmountChange}
+                //onReset={resetBettingForm}
+                />
+              </FormControl>
+
+              <HStack spacing={2} mt={1} mb={2} ml={2} mr={2} alignItems="center" justifyContent="center">
+                <Button
+                  colorScheme="#0040C1"
+                  bg="#0040C1"
+                  color="white"
+                  _hover={{ bg: "#0040C1" }}
+                  width="100%"
+                  py={6}
+                  mb={3}
+                  ml={2}
+                  mr={2}
+                  onClick={() => handleBid()}
+                  isLoading={isResolving}
+                  loadingText="Placing bid..."
+                  isDisabled={!isConnected || selectedSide === null || currentPhase !== Phase.Bidding}
+                >
+                  Betting to rich
+                </Button>
+              </HStack>
+              <Flex justify="space-between" px={2} mb={1}>
+                <Text fontSize="lg" color="gray.400">
+                  Fee:
+                </Text>
+                <Text fontSize="lg" color="gray.400">
+                  {Number(feePercentage) / 10}%
+                </Text>
+              </Flex>
+
+              <Flex justify="space-between" px={2} mb={1}>
+                <Text color="gray.400" fontSize="lg">
+                  Pot. profit:
+                </Text>
+                <Text color={profitPercentage > 0 ? "green.400" : "gray.400"} fontSize="lg">
+                  {potentialProfit} {profitPercentage !== 0 ? `(${profitPercentage > 0 ? '+' : ''}${profitPercentage.toFixed(2)}%)` : ''} ETH
+                </Text>
+              </Flex>
+
+              {/* Your Position */}
+              <Text fontSize="lg" fontWeight="bold" mb={3} color="#FEDF56">Your Position</Text>
+              <Flex justify="space-between" mb={2}>
+                <Text color="green.400">LONG:</Text>
+                <Text color="white">{userPositions.long.toFixed(4)} ETH</Text>
+              </Flex>
+              <Flex justify="space-between">
+                <Text color="red.400">SHORT:</Text>
+                <Text color="white">{userPositions.short.toFixed(4)} ETH</Text>
+              </Flex>
+            </Box>
+            <Box p={4} borderRadius="xl" mb={4} borderWidth={1} borderColor="gray.700">
+              <Text fontSize="lg" fontWeight="bold" mb={3} color="white">
+                My Holdings
+              </Text>
+              <Button
+                variant="ghost"
+                color="#4169e1"
+                onClick={() => router.push('/owner')}
+                rightIcon={<FaChevronRight />}
+                _hover={{ bg: 'rgba(254, 223, 86, 0.1)' }}
+              >
+                Make your first Prediction Market
+              </Button>
+            </Box>
+
+            {/* Market Timeline */}
+            <Box
+              bg="#222530"
+              p={4}
               borderWidth={1}
               borderColor="gray.700"
               borderRadius="30px"
-              position="absolute" // Để box này đè lên box lớn
-              top="55px" // Đặt vị trí để không che tiêu đề
-              left="0"
-              right="0"
-              zIndex={1} // Đảm bảo box này nằm trên cùng
-
+              boxShadow="md"
+              position="relative"
+              height="282px"
             >
-              <VStack align="stretch" spacing={3} position="relative">
-                {/* Vertical Line */}
-                <Box
-                  position="absolute"
-                  left="12px"
-                  top="30px"
-                  bottom="20px"
-                  width="2px"
-                  bg="gray.700"
-                  zIndex={0}
-                />
+              <Text fontSize="lg" fontWeight="bold" mb={4} color="#gray.600" textAlign="center">
+                Market is Live
+              </Text>
 
-                {/* Trading Phase */}
-                <HStack spacing={4}>
-                  <Circle size="25px" {...phaseCircleProps(Phase.Trading)}>1</Circle>
-                  <VStack align="start" spacing={0}>
-                    <Text fontSize="sm" color={currentPhase === Phase.Trading ? "#FEDF56" : "gray.500"}>
-                      Trading
-                    </Text>
-                    <Text fontSize="xs" color="gray.500">
-                      {deployTime ? new Date(deployTime * 1000).toLocaleString() : 'Pending'}
-                    </Text>
-                  </VStack>
-                </HStack>
+              <Box
+                bg="#0B0E16"
+                p={4}
+                borderWidth={1}
+                borderColor="gray.700"
+                borderRadius="30px"
+                position="absolute"
+                top="55px"
+                left="0"
+                right="0"
+                zIndex={1}
 
-                {/* Bidding Phase */}
-                <HStack spacing={4}>
-                  <Circle size="25px" {...phaseCircleProps(Phase.Bidding)}>2</Circle>
-                  <VStack align="start" spacing={0}>
-                    <Text fontSize="sm" color={currentPhase === Phase.Bidding ? "#FEDF56" : "gray.500"}>
-                      Bidding
-                    </Text>
-                    <Text fontSize="xs" color="gray.500">
-                      {biddingStartTime ? new Date(biddingStartTime * 1000).toLocaleString() : 'Waiting for Start'}
-                    </Text>
-                  </VStack>
-                </HStack>
-
-                {/* Maturity Phase with Resolve Button */}
-                <HStack spacing={4} justify="space-between">
-                  <HStack spacing={4}>
-                    <Circle size="25px" {...phaseCircleProps(Phase.Maturity)}>3</Circle>
-                    <VStack align="start" spacing={0}>
-                      <Text fontSize="sm" color={currentPhase === Phase.Maturity ? "#FEDF56" : "gray.500"}>
-                        Maturity
-                      </Text>
-                      <Text fontSize="xs" color="gray.500">
-                        {maturityTime ? formatTimeToLocal(maturityTime) : 'Pending'}
-                      </Text>
-                    </VStack>
-                  </HStack>
-
-                  {/* Resolve Button - Hiển thị khi canResolve = true */}
-                  {canResolve && !isResolving && (
-                    <Button
-                      onClick={() => {
-                        setIsResolving(true);
-                        handleResolveMarket().finally(() => setIsResolving(false));
-                      }}
-                      size="sm"
-                      colorScheme="yellow"
-                      bg="#FEDF56"
-                      color="black"
-                      _hover={{ bg: "#FFE56B" }}
-                      isLoading={isResolving}
-                      loadingText="Resolving"
-                    >
-                      Resolve
-                    </Button>
-                  )}
-                </HStack>
-
-                {/* Expiry Phase */}
-                <HStack spacing={4} justify="space-between">
-                  <HStack spacing={4}>
-                    <Circle size="25px" {...phaseCircleProps(Phase.Expiry)}>4</Circle>
-                    <VStack align="start" spacing={0}>
-                      <Text fontSize="sm" color={currentPhase === Phase.Expiry ? "#FEDF56" : "gray.500"}>
-                        Expiry
-                      </Text>
-                      <Text fontSize="xs" color="gray.500">
-                        {maturityTime ? formatTimeToLocal(maturityTime + 30) : 'Pending'}
-                      </Text>
-                    </VStack>
-                  </HStack>
-
-                  {/* Expire Button - Hiển thị khi ở phase Maturity và đã resolve */}
-                  {currentPhase === Phase.Maturity && finalPrice && (
-                    <Button
-                      onClick={handleExpireMarket}
-                      size="sm"
-                      colorScheme="yellow"
-                      bg="#FEDF56"
-                      color="black"
-                      _hover={{ bg: "#FFE56B" }}
-                      isLoading={isExpiringMarket}
-                      loadingText="Expiring"
-                    >
-                      Expire
-                    </Button>
-                  )}
-                </HStack>
-              </VStack>
-            </Box>
-
-            {/* Claim Button - Hiển thị khi có reward và ở phase Expiry */}
-            {reward > 0 && currentPhase === Phase.Expiry && (
-              <Button
-                onClick={claimReward}
-                colorScheme="yellow"
-                isDisabled={reward === 0}
-                width="100%"
-                mt={4}
               >
-                Claim {reward.toFixed(4)} ETH
-              </Button>
-            )}
-          </Box>
+                <VStack align="stretch" spacing={3} position="relative">
+                  {/* Vertical Line */}
+                  <Box
+                    position="absolute"
+                    left="16px"
+                    top="30px"
+                    bottom="20px"
+                    width="2px"
+                    bg="gray.700"
+                    zIndex={0}
+                  />
 
-        </Box>
-      </Flex>
-    </Box>
-  );
+                  {/* Trading Phase */}
+                  <HStack spacing={4}>
+                    <Circle size="35px" bg="green.400" color="green.400" {...phaseCircleProps(Phase.Trading)}>1</Circle>
+                    <VStack align="start" spacing={0} fontWeight="bold">
+                      <Text fontSize="lg" color={currentPhase === Phase.Trading ? "green.400" : "gray.500"} >
+                        Trading
+                      </Text>
+                      <Text fontSize="xs" color="gray.500">
+                        {deployTime ? new Date(deployTime * 1000).toLocaleString() : 'Pending'}
+                      </Text>
+                    </VStack>
+                    <Spacer />
+                    {currentPhase === Phase.Trading && isOwner && (
+                      <Button
+                        onClick={startBidding}
+                        size="sm"
+                        colorScheme="yellow"
+                        bg="#FEDF56"
+                        color="black"
+                        _hover={{ bg: "#FFE56B" }}
+                        alignItems="center"
+                        justifyContent="center"
+                        width="35%"
+                      >
+                        Start Bidding
+                      </Button>
+                    )}
+                  </HStack>
+
+                  {/* Bidding Phase */}
+                  <HStack spacing={4}>
+                    <Circle size="35px" {...phaseCircleProps(Phase.Bidding)}>2</Circle>
+                    <VStack align="start" spacing={0} fontWeight="bold">
+                      <Text fontSize="lg" color={currentPhase === Phase.Bidding ? "blue.400" : "gray.500"}>
+                        Bidding
+                      </Text>
+                      <Text fontSize="xs" color="gray.500">
+                        {biddingStartTime ? new Date(biddingStartTime * 1000).toLocaleString() : 'Waiting for Start'}
+                      </Text>
+                    </VStack>
+                  </HStack>
+
+                  {/* Maturity Phase with Resolve Button */}
+                  <HStack spacing={4} justify="space-between">
+                    <HStack spacing={4}>
+                      <Circle size="35px" {...phaseCircleProps(Phase.Maturity)}>3</Circle>
+                      <VStack align="start" spacing={0} fontWeight="bold">
+                        <Text fontSize="lg" color={currentPhase === Phase.Maturity ? "orange.400" : "gray.500"}>
+                          Maturity
+                        </Text>
+                        <Text fontSize="xs" color="gray.500">
+                          {maturityTime ? formatTimeToLocal(maturityTime) : 'Pending'}
+                        </Text>
+                      </VStack>
+                    </HStack>
+                    <Spacer />
+                    {/* Resolve Button - Show when canResolve = true */}
+                    {canResolve && !isResolving && (
+                      <Button
+                        onClick={() => {
+                          setIsResolving(true);
+                          handleResolveMarket().finally(() => setIsResolving(false));
+                        }}
+                        size="sm"
+                        colorScheme="yellow"
+                        bg="#FEDF56"
+                        color="black"
+                        _hover={{ bg: "#FFE56B" }}
+                        isLoading={isResolving}
+                        loadingText="Resolving"
+                        alignItems="center"
+                        justifyContent="center"
+                        width="35%"
+                      >
+                        Resolve
+                      </Button>
+                    )}
+                  </HStack>
+
+                  {/* Expiry Phase */}
+                  <HStack spacing={4} justify="space-between">
+                    <HStack spacing={4}>
+                      <Circle size="35px" {...phaseCircleProps(Phase.Expiry)}>4</Circle>
+                      <VStack align="start" spacing={0} fontWeight="bold">
+                        <Text fontSize="lg" color={currentPhase === Phase.Expiry ? "red.400" : "gray.500"}>
+                          Expiry
+                        </Text>
+                        <Text fontSize="xs" color="gray.500">
+                          {maturityTime ? formatTimeToLocal(maturityTime + 30) : 'Pending'}
+                        </Text>
+                      </VStack>
+                    </HStack>
+                    <Spacer />
+                    {/* Expire Button - Show when ở phase Maturity and resolved */}
+                    {currentPhase === Phase.Maturity && finalPrice && isOwner && (
+                      <Button
+                        onClick={handleExpireMarket}
+                        size="sm"
+                        colorScheme="yellow"
+                        bg="#FEDF56"
+                        color="black"
+                        _hover={{ bg: "#FFE56B" }}
+                        isLoading={isExpiringMarket}
+                        loadingText="Expiring"
+                        alignItems="center"
+                        justifyContent="center"
+                        width="35%"
+                      >
+                        Expire
+                      </Button>
+                    )}
+                  </HStack>
+                </VStack>
+              </Box>
+
+              {/* Claim Button - Show when have reward and ở phase Expiry */}
+              {reward > 0 && currentPhase === Phase.Expiry && (
+                <Button
+                  onClick={claimReward}
+                  colorScheme="yellow"
+                  bg="#FEDF56"
+                  color="white"
+                  _hover={{ bg: "#FFE56B" }}
+                  isDisabled={reward === 0}
+                  width="100%"
+                  mt={4}
+                >
+                  Claim {reward.toFixed(4)} ETH
+                </Button>
+              )}
+            </Box>
+          </Box>
+        </Flex>
+      </Box>
+    );
+  }
 }
 
 export default Customer;
