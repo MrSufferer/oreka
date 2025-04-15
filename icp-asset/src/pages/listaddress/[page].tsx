@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import ListAddressOwner from '../../components/ListAddressOwner';
 import { useEffect, useState } from 'react';
 import { AuthClient } from '@dfinity/auth-client';
-import { Box, Center, Spinner, Text } from '@chakra-ui/react';
+import { Box, Center, Spinner, Text, Button, VStack } from '@chakra-ui/react';
 
 const ListAddressPage = () => {
     const router = useRouter();
@@ -10,6 +10,32 @@ const ListAddressPage = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [principal, setPrincipal] = useState("");
+
+    // Handle login click
+    const handleLogin = async () => {
+        try {
+            const authClient = await AuthClient.create();
+
+            // Determine if we're in development environment and use local II canister
+            const isDevelopment = process.env.NODE_ENV === 'development';
+            const iiUrl = isDevelopment
+                ? `http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943`
+                : process.env.NEXT_PUBLIC_II_URL || "https://identity.ic0.app";
+
+            console.log("Using II URL:", iiUrl);
+
+            // Start the login flow
+            await authClient.login({
+                identityProvider: iiUrl,
+                onSuccess: () => {
+                    // Refresh the page after successful login
+                    window.location.reload();
+                }
+            });
+        } catch (error) {
+            console.error("Login failed:", error);
+        }
+    };
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -33,13 +59,6 @@ const ListAddressPage = () => {
         checkAuth();
     }, []);
 
-    useEffect(() => {
-        // If not authenticated and finished loading, redirect to home
-        if (!isLoading && !isAuthenticated) {
-            router.push('/');
-        }
-    }, [isLoading, isAuthenticated, router]);
-
     if (isLoading) {
         return (
             <Center h="60vh">
@@ -51,7 +70,17 @@ const ListAddressPage = () => {
     if (!isAuthenticated) {
         return (
             <Center h="60vh">
-                <Text>Please log in to view markets</Text>
+                <VStack spacing={4}>
+                    <Text fontSize="xl">Please log in to view markets</Text>
+                    <Button
+                        colorScheme="blue"
+                        size="lg"
+                        onClick={handleLogin}
+                        bgGradient="linear(to-r, #2575fc, #6a11cb)"
+                    >
+                        Login with Internet Identity
+                    </Button>
+                </VStack>
             </Center>
         );
     }

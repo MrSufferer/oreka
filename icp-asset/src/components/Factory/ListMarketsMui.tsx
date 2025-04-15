@@ -217,7 +217,7 @@ const ListMarketsMui: React.FC<ListMarketsProps> = ({ userPrincipal, page = 1 })
         try {
             if (typeof window !== 'undefined') {
                 if (contractType === 'BinaryOptionMarket') {
-                    window.location.href = `/?marketId=${contractId}`;
+                    window.location.href = `/customer/${contractId}`;
                 } else if (contractType === 'ICRC1Token') {
                     window.location.href = `/?tokenId=${contractId}`;
                 } else {

@@ -2,10 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useCallback } from 'react'; // Thêm import useCallback
 import {
     Flex, Box, Text, Button, VStack, useToast, Input,
-    Select, HStack, Icon, ScaleFade, Table, Thead, Tbody, Tr, Th, Td, TableContainer
+    Select, HStack, Icon, ScaleFade, Table, Thead, Tbody, Tr, Th, Td, TableContainer,
+    Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Divider
 } from '@chakra-ui/react';
-import { FaEthereum, FaWallet, FaTrophy } from 'react-icons/fa';
-
+import { FaEthereum, FaWallet, FaTrophy, FaRegClock, FaArrowUp, FaArrowDown, FaCoins } from 'react-icons/fa';
+import { GoInfinity } from "react-icons/go";
+import { PiChartLineUpLight } from "react-icons/pi";
+import { SiBitcoinsv } from "react-icons/si";
 import { useRouter } from 'next/router';
 import { BinaryOptionMarketService, IBinaryOptionMarketService } from '../service/binary-option-market-service';
 import { Principal } from '@dfinity/principal';
@@ -13,6 +16,9 @@ import { current } from '@reduxjs/toolkit';
 import { AuthClient } from '@dfinity/auth-client';
 import { setActorIdentity, setIcpLedgerIdentity } from '../service/actor-locator';
 import { IIcpLedgerService, IcpLedgerService } from '../service/icp-ledger-service';
+import { format } from 'date-fns';
+import { PriceService, PriceData } from '../service/price-service';
+import MarketCharts from './charts/MarketCharts';
 
 // Add typings import for ICRC1 Account
 import type { Account as ICRC1Account } from '../service/icp-ledger-service';
@@ -28,7 +34,13 @@ interface Coin {
     label: string;
 }
 
-function Customer() {
+interface CustomerProps {
+    contractAddress: string;
+}
+
+function Customer({ contractAddress }: CustomerProps) {
+    console.log("Customer component rendering with contractAddress:", contractAddress);
+
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [selectedSide, setSelectedSide] = useState<Side | null>(null);
     const [walletAddress, setWalletAddress] = useState<string>("");
@@ -37,7 +49,6 @@ function Customer() {
     const [accumulatedWinnings, setAccumulatedWinnings] = useState(0);
     const [bidAmount, setBidAmount] = useState("");
     const [currentPhase, setCurrentPhase] = useState<Phase>(Phase.Trading);
-    //const [positions, setPositions] = useState({ long: 0, short: 0 });
     const [totalDeposited, setTotalDeposited] = useState(0);
     const [strikePrice, setStrikePrice] = useState<number>(0);
     const [finalPrice, setFinalPrice] = useState<number>(0);
@@ -49,10 +60,22 @@ function Customer() {
     const [reward, setReward] = useState(0); // Số phần thưởng khi người chơi thắng
     const [positions, setPositions] = useState<{ long: number; short: number }>({ long: 0, short: 0 });
     const [totalMarketPositions, setTotalMarketPositions] = useState<{ long: number; short: number }>({ long: 0, short: 0 });
-
     const [authenticated, setAuthenticated] = useState(false);
-
     const [endTimestamp, setEndTimestamp] = useState<number | null>(null);
+
+    // New chart-related state variables
+    const [chartData, setChartData] = useState<any[]>([]);
+    const [positionHistory, setPositionHistory] = useState<any[]>([]);
+    const [chartSymbol, setChartSymbol] = useState<string>('ETH-USD');
+    const [currentPrice, setCurrentPrice] = useState<number>(0);
+    const [longPercentage, setLongPercentage] = useState<number>(50);
+    const [shortPercentage, setShortPercentage] = useState<number>(50);
+    const [priceTimeRange, setPriceTimeRange] = useState<string>('1w');
+    const [positionTimeRange, setPositionTimeRange] = useState<string>('all');
+    const [biddingStartTime, setBiddingStartTime] = useState<number>(Math.floor(Date.now() / 1000) - 3600);
+    const [tradingPair, setTradingPair] = useState<string>('ETH/USD');
+    const [showRules, setShowRules] = useState<boolean>(true);
+    const [marketResult, setMarketResult] = useState<string>('Pending');
 
     const [availableCoins] = useState<Coin[]>([
         { value: "0x5fbdb2315678afecb367f032d93f642f64180aa3", label: "ICP/USD" },
@@ -61,7 +84,7 @@ function Customer() {
     ]);
 
     const toast = useToast();
-    const router = useRouter(); // Initialize the router
+    const router = useRouter();
     const [marketService, setMarketService] = useState<BinaryOptionMarketService | null>(null);
     const [ledgerService, setLedgerService] = useState<IcpLedgerService | null>(null);
     const [shouldCheckRewardClaimability, setShouldCheckRewardClaimability] = useState(false);
@@ -72,6 +95,18 @@ function Customer() {
     const [showMarketSelection, setShowMarketSelection] = useState(false);
     const [factoryService, setFactoryService] = useState<FactoryService | null>(null);
     const [availableMarkets, setAvailableMarkets] = useState<MarketInfo[]>([]);
+
+    // Add better debug logging for market ID
+    useEffect(() => {
+        if (contractAddress) {
+            console.log("INITIALIZATION: Using contract address as market ID:", contractAddress);
+            setMarketId(contractAddress);
+            setShowMarketSelection(false);
+        } else {
+            console.log("INITIALIZATION: No contract address provided, showing market selection");
+            setShowMarketSelection(true);
+        }
+    }, [contractAddress]);
 
     const formatTimeRemaining = (timestampSec: number): string => {
         const now = Math.floor(Date.now() / 1000); // Convert current time to seconds
@@ -99,28 +134,6 @@ function Customer() {
     //     setBalance(balanceEth);
     //     setIsLoggedIn(true);
     // }, [isLoggedIn]);
-
-    useEffect(() => {
-        // Check for marketId in the URL query parameters
-        if (typeof window !== 'undefined') {
-            const params = new URLSearchParams(window.location.search);
-            const marketIdFromUrl = params.get('marketId');
-
-            if (marketIdFromUrl) {
-                console.log("Market ID from URL:", marketIdFromUrl);
-                // Only set if changed to avoid unnecessary reloads
-                if (marketId !== marketIdFromUrl) {
-                    setMarketId(marketIdFromUrl);
-                    setShowMarketSelection(false);
-                }
-            } else {
-                // No market ID in URL, always show market selection first
-                console.log("No market ID available, showing market selection");
-                setShowMarketSelection(true);
-                setMarketId(null);
-            }
-        }
-    }, [marketId, router]);
 
     // This effect will handle market service reinitialization when marketId changes
     useEffect(() => {
@@ -163,40 +176,55 @@ function Customer() {
     // Initialize factory service along with other services
     useEffect(() => {
         const initServices = async () => {
-            const authClient = await AuthClient.create();
-            const identity = authClient.getIdentity();
+            try {
+                console.log("INIT SERVICES: Starting service initialization");
+                const authClient = await AuthClient.create();
+                const identity = authClient.getIdentity();
+                console.log("INIT SERVICES: Got identity", identity.getPrincipal().toText());
 
-            // Initialize factory service first
-            const factory = FactoryService.getInstance();
-            await factory.initialize();
-            setFactoryService(factory);
+                // Initialize factory service first
+                const factory = FactoryService.getInstance();
+                await factory.initialize();
+                setFactoryService(factory);
+                console.log("INIT SERVICES: Factory service initialized");
 
-            // Initialize other services as before
-            setIcpLedgerIdentity(identity)
-            const icpLedgerService = IcpLedgerService.getInstance();
-            await icpLedgerService.initialize();
-            setLedgerService(icpLedgerService);
+                // Initialize other services as before
+                await setIcpLedgerIdentity(identity);
+                const icpLedgerService = IcpLedgerService.getInstance();
+                await icpLedgerService.initialize();
+                setLedgerService(icpLedgerService);
+                console.log("INIT SERVICES: Ledger service initialized");
 
-            await setActorIdentity(identity)
-            const service = BinaryOptionMarketService.getInstance();
+                await setActorIdentity(identity);
+                const service = BinaryOptionMarketService.getInstance();
 
-            // Only initialize market service if we have a market ID
-            if (marketId) {
-                console.log("Initializing market service with canister ID:", marketId);
-                await service.initialize(marketId);
-                setShowMarketSelection(false);
-            } else {
-                // If no market ID, fetch available markets and show selection
-                console.log("No market ID, showing selection");
-                setShowMarketSelection(true);
-                const markets = await factory.getMarkets();
-                setAvailableMarkets(markets);
+                // Only initialize market service if we have a market ID
+                if (marketId) {
+                    console.log("INIT SERVICES: Initializing market service with canister ID:", marketId);
+                    await service.initialize(marketId);
+                    setShowMarketSelection(false);
+                } else {
+                    // If no market ID, fetch available markets and show selection
+                    console.log("INIT SERVICES: No market ID, showing selection");
+                    setShowMarketSelection(true);
+                    try {
+                        const markets = await factory.getMarkets();
+                        console.log("INIT SERVICES: Got markets:", markets);
+                        setAvailableMarkets(markets);
+                    } catch (error) {
+                        console.error("INIT SERVICES: Error fetching markets:", error);
+                    }
+                }
+
+                setMarketService(service);
+                console.log("INIT SERVICES: Market service set, initialization complete");
+            } catch (error) {
+                console.error("INIT SERVICES: Error during initialization:", error);
             }
-
-            setMarketService(service);
         };
 
         if (authenticated && (!factoryService || !marketService || !ledgerService)) {
+            console.log("INIT SERVICES: Triggering initialization - authenticated:", authenticated);
             initServices();
         }
     }, [authenticated, marketId]);
@@ -209,97 +237,147 @@ function Customer() {
     }, [showMarketSelection, factoryService, fetchAvailableMarkets]);
 
     const fetchMarketDetails = useCallback(async () => {
-        if (marketService) {
-            try {
+        try {
+            console.log("FETCH DETAILS: Starting market details fetch");
 
-                const phaseState = await marketService.getCurrentPhase();
-                //@TODO: Make this a function
-                if (('Trading' in phaseState)) {
-                    setCurrentPhase(Phase.Trading);
-                } else if (('Bidding' in phaseState)) {
-                    setCurrentPhase(Phase.Bidding);
-                } else if (('Maturity' in phaseState)) {
-                    setCurrentPhase(Phase.Maturity);
-                } else if (('Expiry' in phaseState)) {
-                    setCurrentPhase(Phase.Expiry);
-                }
+            if (!marketService) {
+                console.error("FETCH DETAILS: Market service not available");
+                return;
+            }
+
+            console.log("FETCH DETAILS: Getting current phase");
+            const phaseState = await marketService.getCurrentPhase();
+            console.log("FETCH DETAILS: Current phase state:", phaseState);
+
+            //@TODO: Make this a function
+            if (('Trading' in phaseState)) {
+                setCurrentPhase(Phase.Trading);
+            } else if (('Bidding' in phaseState)) {
+                setCurrentPhase(Phase.Bidding);
+            } else if (('Maturity' in phaseState)) {
+                setCurrentPhase(Phase.Maturity);
+            } else if (('Expiry' in phaseState)) {
+                setCurrentPhase(Phase.Expiry);
+            }
+
+            console.log("FETCH DETAILS: Getting market details");
+            const marketDetails = await marketService.getMarketDetails();
+            console.log("FETCH DETAILS: Market details:", marketDetails);
 
 
-                const marketDetails = await marketService.getMarketDetails()
+            const strikePrice = marketDetails.oracleDetails.strikePrice;
+            const finalPrice = marketDetails.oracleDetails.finalPrice;
 
+            console.log("FETCH DETAILS: Strike price:", strikePrice);
+            console.log("FETCH DETAILS: Final price:", finalPrice);
 
-                const strikePrice = marketDetails.oracleDetails.strikePrice;
-                const finalPrice = marketDetails.oracleDetails.finalPrice;
+            setStrikePrice(strikePrice); // Giả định 8 số thập phân
+            setFinalPrice(finalPrice);   // Giả định 8 số thập phân
 
-
-                setStrikePrice(strikePrice); // Giả định 8 số thập phân
-                setFinalPrice(finalPrice);   // Giả định 8 số thập phân
-
-                // Get user position
+            // Get user position
+            console.log("FETCH DETAILS: Getting user position for principal:", identityPrincipal);
+            if (!identityPrincipal) {
+                console.log("FETCH DETAILS: No identity principal available");
+            } else {
                 const userPosition = await marketService.getUserPosition(Principal.fromText(identityPrincipal));
+                console.log("FETCH DETAILS: User position:", userPosition);
+
                 if (userPosition) {
-                    setPositions({ long: Number(userPosition.long) / 10e7, short: Number(userPosition.short) / 10e7 });
+                    setPositions({
+                        long: Number(userPosition.long) / 10e7,
+                        short: Number(userPosition.short) / 10e7
+                    });
                 } else {
-                    console.error("User position is null. Setting default positions.");
+                    console.log("FETCH DETAILS: User position is null. Setting default positions.");
                     setPositions({ long: 0, short: 0 });
                 }
 
                 // Get total market positions
+                console.log("FETCH DETAILS: Setting total market positions");
                 setTotalMarketPositions({
                     long: Number(marketDetails.positions.long) / 10e7,
                     short: Number(marketDetails.positions.short) / 10e7
                 });
 
-                const totalDeposit = await marketService.getTotalDeposit()
-                setTotalDeposited(Number(totalDeposit) / 10e7)
+                console.log("FETCH DETAILS: Getting total deposit");
+                const totalDeposit = await marketService.getTotalDeposit();
+                setTotalDeposited(Number(totalDeposit) / 10e7);
 
                 if (currentPhase === Phase.Expiry) {
+                    console.log("FETCH DETAILS: Market is in Expiry phase, checking reward claimability");
                     setShouldCheckRewardClaimability(true);
                 }
 
+                console.log("FETCH DETAILS: Getting end timestamp");
                 const timestamp = await marketService.getEndTimestamp();
                 if (timestamp) {
-                    console.log("timestamp in seconds:", timestamp);
+                    console.log("FETCH DETAILS: End timestamp (seconds):", timestamp);
                     setEndTimestamp(Number(timestamp));  // No need for conversion since it's already in seconds
                 }
-            } catch (error: any) {
-                console.error("Error fetching market details:", error);
             }
+        } catch (error) {
+            console.error("FETCH DETAILS: Error fetching market details:", error);
         }
 
-        if (ledgerService) {
-            const userBalance = await ledgerService.getBalance({ owner: Principal.fromText(identityPrincipal), subaccount: [] })
-            console.log(userBalance);
-            setBalance((Number(userBalance) / 10e7).toFixed(4).toString())
+        try {
+            if (ledgerService && identityPrincipal) {
+                console.log("FETCH DETAILS: Getting user balance");
+                const userBalance = await ledgerService.getBalance({
+                    owner: Principal.fromText(identityPrincipal),
+                    subaccount: []
+                });
+                console.log("FETCH DETAILS: User balance:", userBalance);
+                setBalance((Number(userBalance) / 10e7).toFixed(4).toString());
+            }
+        } catch (error) {
+            console.error("FETCH DETAILS: Error fetching user balance:", error);
         }
-    }, [marketService, currentPhase, ledgerService]);
+    }, [marketService, ledgerService, identityPrincipal, currentPhase]);
 
     const setInitialIdentity = async () => {
         try {
+            console.log("IDENTITY: Starting identity initialization");
             const authClient = await AuthClient.create();
             const identity = authClient.getIdentity();
-            const isAuthenticated = await authClient.isAuthenticated()
+            const isAuthenticated = await authClient.isAuthenticated();
 
             if (isAuthenticated) {
-                console.log(identity.getPrincipal().toText())
-                setIdentityPrincipal(identity.getPrincipal().toText())
-                await setActorIdentity(identity)
-                await setIcpLedgerIdentity(identity)
+                console.log("IDENTITY: User is authenticated with principal:", identity.getPrincipal().toText());
+                setIdentityPrincipal(identity.getPrincipal().toText());
 
+                console.log("IDENTITY: Setting actor identity");
+                await setActorIdentity(identity);
+
+                console.log("IDENTITY: Setting ICP ledger identity");
+                await setIcpLedgerIdentity(identity);
+
+                console.log("IDENTITY: Initializing services");
                 const icpLedgerService = IcpLedgerService.getInstance();
                 await icpLedgerService.initialize();
                 setLedgerService(icpLedgerService);
 
                 const service = BinaryOptionMarketService.getInstance();
-                await service.initialize();
+
+                // Initialize with market ID if available
+                if (marketId) {
+                    console.log("IDENTITY: Initializing market service with ID:", marketId);
+                    await service.initialize(marketId);
+                } else {
+                    console.log("IDENTITY: Initializing market service without specific ID");
+                    await service.initialize();
+                }
+
                 setMarketService(service);
+                console.log("IDENTITY: Services initialized successfully");
+            } else {
+                console.log("IDENTITY: User is not authenticated");
             }
 
             setAuthenticated(isAuthenticated);
         } catch (error) {
-            console.error(error);
+            console.error("IDENTITY: Error during identity initialization:", error);
         }
-    }
+    };
 
     useEffect(() => {
         // prevent server-side rendering
@@ -592,7 +670,7 @@ function Customer() {
 
     // Add a function to select a market
     const selectMarket = (marketId: string) => {
-        router.push(`?marketId=${marketId}`);
+        router.push(`/customer/${marketId}`);
         setMarketId(marketId);
         setShowMarketSelection(false);
     };
@@ -612,7 +690,7 @@ function Customer() {
                             <Button
                                 key={market.id}
                                 onClick={() => {
-                                    router.push(`?marketId=${market.id}`);
+                                    router.push(`/customer/${market.id}`);
                                     setMarketId(market.id);
                                     setShowMarketSelection(false);
                                 }}
@@ -634,246 +712,501 @@ function Customer() {
         );
     };
 
+    useEffect(() => {
+        // Update position percentages based on total positions
+        if (totalMarketPositions.long + totalMarketPositions.short > 0) {
+            const total = totalMarketPositions.long + totalMarketPositions.short;
+            setLongPercentage((totalMarketPositions.long / total) * 100);
+            setShortPercentage((totalMarketPositions.short / total) * 100);
+        } else {
+            // Default to 50/50 if no positions
+            setLongPercentage(50);
+            setShortPercentage(50);
+        }
+    }, [totalMarketPositions]);
+
+    // Handle price updates and chart data
+    useEffect(() => {
+        if (!authenticated || !marketId) return;
+
+        const priceService = PriceService.getInstance();
+        let tradingPairForChart = 'ETH-USD'; // Default
+
+        const loadTradingPair = async () => {
+            try {
+                if (marketService) {
+                    const marketDetails = await marketService.getMarketDetails();
+                    if (marketDetails && marketDetails.tradingPair) {
+                        setTradingPair(marketDetails.tradingPair);
+                        tradingPairForChart = marketDetails.tradingPair.replace('/', '-');
+                        setChartSymbol(tradingPairForChart);
+                    }
+                }
+            } catch (error) {
+                console.error("Error loading trading pair:", error);
+            }
+        };
+
+        loadTradingPair();
+
+        // Subscribe to price updates
+        const unsubscribe = priceService.subscribeToPriceUpdates((data: PriceData) => {
+            setCurrentPrice(data.price);
+        }, tradingPairForChart);
+
+        // Load historical price data
+        const loadChartData = async () => {
+            try {
+                const data = await priceService.fetchKlines(tradingPairForChart);
+                setChartData(data);
+            } catch (error) {
+                console.error("Error loading chart data:", error);
+            }
+        };
+
+        loadChartData();
+
+        // Create position history for the chart
+        const generatePositionHistory = () => {
+            const history = [];
+            const now = Math.floor(Date.now() / 1000);
+
+            // Only generate mock position history if we don't have real data
+            // Start from bidding time to current time
+            if (biddingStartTime) {
+                const startTime = biddingStartTime;
+                const endTime = now;
+                const interval = Math.max(Math.floor((endTime - startTime) / 10), 1);
+
+                let longPercent = 50;
+                let shortPercent = 50;
+
+                for (let time = startTime; time <= endTime; time += interval) {
+                    // Generate some random variation
+                    const variation = Math.random() * 10 - 5; // -5 to +5 percent
+                    longPercent = Math.max(10, Math.min(90, longPercent + variation));
+                    shortPercent = 100 - longPercent;
+
+                    history.push({
+                        timestamp: time,
+                        longPercentage: longPercent / 100,
+                        shortPercentage: shortPercent / 100,
+                        isMainPoint: time === startTime || time === endTime
+                    });
+                }
+
+                // Add the current position percentages
+                if (longPercentage !== null && shortPercentage !== null) {
+                    history.push({
+                        timestamp: now,
+                        longPercentage: longPercentage / 100,
+                        shortPercentage: shortPercentage / 100,
+                        isMainPoint: true,
+                        isCurrentPoint: true
+                    });
+                }
+            }
+
+            setPositionHistory(history);
+        };
+
+        generatePositionHistory();
+
+        return () => {
+            unsubscribe();
+        };
+    }, [authenticated, marketId, marketService, biddingStartTime, longPercentage, shortPercentage]);
+
+    // Function to handle time range changes for charts
+    const handleTimeRangeChange = (range: string, chartType: 'price' | 'position') => {
+        if (chartType === 'price') {
+            setPriceTimeRange(range);
+        } else {
+            setPositionTimeRange(range);
+        }
+    };
+
+    // Format timestamp as readable date
+    const formatMaturityTime = (timestamp: number): string => {
+        try {
+            const date = new Date(timestamp * 1000);
+            return format(date, 'MMM d, yyyy HH:mm');
+        } catch (error) {
+            return "Unknown";
+        }
+    };
+
     return (
         <Flex direction="column" alignItems="center" justifyContent="flex-start" p={6} bg="black" minH="100vh" position="relative">
             {showMarketSelection ? (
                 renderMarketSelection()
             ) : (
-                <VStack
-                    width={{ base: '90%', md: '700px' }}
-                    spacing={8}
-                    align="stretch"
-                >
-                    {authenticated && (
-                        <HStack spacing={4} justify="space-between" width="100%">
-                            <HStack>
-                                <Icon as={FaWallet} />
-                                <Text>{abbreviateAddress(identityPrincipal)}</Text>
-                            </HStack>
-                            <HStack>
-                                <Icon as={FaEthereum} />
-                                <Text>{balance} ICP</Text>
-                            </HStack>
-                            <HStack>
-                                {/* <Icon as={FaTrophy} />
-              <Text>{accumulatedWinnings.toFixed(4)} ETH</Text> */}
-                                {reward > 0 && showClaimButton && (
-                                    <Button onClick={claimReward} size="sm" colorScheme="yellow" variant="outline"
+                <>
+                    {/* Header Bar */}
+                    <Flex
+                        width="100%"
+                        justifyContent="space-between"
+                        alignItems="center"
+                        py={3}
+                        px={6}
+                        borderBottom="1px solid"
+                        borderColor="gray.800"
+                        mb={4}
+                    >
+                        <Button
+                            leftIcon={<FaArrowUp color="#FEDF56" />}
+                            borderColor="#FEDF56"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => router.push('/listaddress/1')}
+                            color="#FEDF56"
+                        >
+                            Markets
+                        </Button>
+
+                        <HStack spacing={6} ml="auto" color="#FEDF56">
+                            <Icon as={FaWallet} />
+                            <Text>{abbreviateAddress(identityPrincipal)}</Text>
+                            <Icon as={GoInfinity} />
+                            <Text>Balance: {balance} ICP</Text>
+                        </HStack>
+                    </Flex>
+
+                    {/* Market Title and Info */}
+                    <Box display="flex" alignItems="center" mb={6} ml={6} width="100%">
+                        <HStack>
+                            {/* Coin Image */}
+                            <Box
+                                borderRadius="full"
+                                bg="gray.800"
+                                p={2}
+                                mr={4}
+                            >
+                                <Icon
+                                    as={tradingPair.includes("BTC") ? SiBitcoinsv :
+                                        tradingPair.includes("ETH") ? FaEthereum :
+                                            GoInfinity}
+                                    boxSize="30px"
+                                    color="#FEDF56"
+                                />
+                            </Box>
+
+                            <Box>
+                                <Heading size="md" fontSize="30px">
+                                    <HStack>
+                                        <Text color="#FEDF56" fontSize="30px">
+                                            {tradingPair}
+                                        </Text>
+                                        <Text color="white" fontSize="25px">
+                                            will reach ${strikePrice} by {formatMaturityTime(endTimestamp || 0)}
+                                        </Text>
+                                    </HStack>
+                                </Heading>
+                                <HStack spacing={2}>
+                                    <HStack color="gray.400">
+                                        <PiChartLineUpLight />
+                                        <Text color="gray.400" fontSize="sm">
+                                            {totalDeposited.toFixed(2)} ICP |
+                                        </Text>
+                                    </HStack>
+                                    <HStack color="gray.400">
+                                        <FaRegClock />
+                                        <Text color="gray.400" fontSize="sm">
+                                            {endTimestamp ? formatMaturityTime(endTimestamp) : "Unknown"} |
+                                        </Text>
+                                    </HStack>
+                                    <HStack color="gray.400">
+                                        <Icon as={FaRegClock} />
+                                        <Text color="gray.400" fontSize="sm">
+                                            Phase: {Phase[currentPhase]}
+                                        </Text>
+                                    </HStack>
+                                </HStack>
+                            </Box>
+                            {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
+                                <Box
+                                    border="1px solid #FEDF56"
+                                    borderRadius="md"
+                                    p={3}
+                                    mb={4}
+                                    textAlign="center"
+                                    ml="100px"
+                                    textColor="white"
+                                >
+                                    <Text fontWeight="bold">Result: {finalPrice >= strikePrice ? "LONG WINS" : "SHORT WINS"}</Text>
+                                </Box>
+                            )}
+                        </HStack>
+                    </Box>
+
+                    {/* Main Content */}
+                    <Flex direction={{ base: "column", md: "row" }} width="100%">
+                        {/* Left Side - Charts and Rules */}
+                        <Box width={{ base: "100%", md: "75%" }} pr={{ base: 0, md: 4 }}>
+                            <Tabs variant="line" colorScheme="yellow">
+                                <TabList>
+                                    <Tab>Price Chart</Tab>
+                                    <Tab>Position Chart</Tab>
+                                </TabList>
+
+                                <TabPanels>
+                                    <TabPanel p={0} pt={4}>
+                                        <Box position="relative" width="100%">
+                                            <MarketCharts
+                                                chartData={chartData}
+                                                positionHistory={positionHistory}
+                                                positions={{ long: totalMarketPositions.long, short: totalMarketPositions.short }}
+                                                strikePrice={strikePrice}
+                                                timeRange={priceTimeRange}
+                                                chartType="price"
+                                                onTimeRangeChange={handleTimeRangeChange}
+                                                chartSymbol={chartSymbol}
+                                                biddingStartTime={biddingStartTime}
+                                                maturityTime={endTimestamp || (Math.floor(Date.now() / 1000) + 86400)}
+                                            />
+                                        </Box>
+                                    </TabPanel>
+
+                                    <TabPanel p={0} pt={4}>
+                                        <MarketCharts
+                                            chartData={[]}
+                                            positionHistory={positionHistory}
+                                            positions={{ long: totalMarketPositions.long, short: totalMarketPositions.short }}
+                                            strikePrice={strikePrice}
+                                            timeRange={positionTimeRange}
+                                            chartType="position"
+                                            onTimeRangeChange={handleTimeRangeChange}
+                                            chartSymbol={chartSymbol}
+                                            biddingStartTime={biddingStartTime}
+                                            maturityTime={endTimestamp || (Math.floor(Date.now() / 1000) + 86400)}
+                                        />
+                                    </TabPanel>
+                                </TabPanels>
+                            </Tabs>
+
+                            {/* Rules Section */}
+                            <Box mt={8} border="1px solid #2D3748" borderRadius="xl" p={4}>
+                                <Flex justify="space-between" align="center" onClick={() => setShowRules(!showRules)} cursor="pointer">
+                                    <Heading size="md" color="#F0F8FF" fontSize="25px">Rules:</Heading>
+                                </Flex>
+                                {showRules && (
+                                    <Box mt={4}>
+                                        <Text color="gray.400" mb={3}>
+                                            This is a binary option market where users can place bids on whether the price will be above (LONG) or below (SHORT) the strike price: {strikePrice} USD at maturity.
+                                        </Text>
+
+                                        <Text color="gray.300" mt={2} mb={2}>The market goes through four phases: Trading, Bidding, Maturity, and Expiry.</Text>
+
+                                        <Text color="gray.400" mb={4}>
+                                            During the Trading phase, users can view the market but cannot place bids. In the Bidding phase, users can place LONG or SHORT bids. At Maturity, the final price is determined and winners can claim their rewards. In the Expiry phase, the market is closed and all rewards are distributed.
+                                        </Text>
+
+                                        <Text color="gray.400" mb={3}>
+                                            The potential profit depends on the ratio of LONG to SHORT bids. If more users bet against you, your potential profit increases. A fee of 6.8% is charged on all bids to maintain the platform.
+                                        </Text>
+
+                                        <Text color="gray.400" mb={3}>
+                                            Price data is sourced from cryptocurrency exchanges to ensure accurate and reliable market prices.
+                                        </Text>
+                                    </Box>
+                                )}
+                            </Box>
+                        </Box>
+
+                        {/* Right Side - Bid Panel and Market Info */}
+                        <Box width={{ base: "100%", md: "25%" }} mt={{ base: 4, md: 0 }} ml={{ base: 0, md: 4 }}>
+                            {/* Strike Price */}
+                            <Box
+                                bg="gray.800"
+                                p={4}
+                                borderRadius="xl"
+                                mb={4}
+                                borderWidth={1}
+                                borderColor="gray.700"
+                            >
+                                <Flex justify="space-between" align="center" textAlign="center" fontSize="20px" color="#FEDF56">
+                                    <HStack justify="center" align="center">
+                                        <Text color="gray.400">Strike Price: </Text>
+                                        <Text fontWeight="bold">{strikePrice} USD</Text>
+                                    </HStack>
+                                </Flex>
+
+                                {/* Show Final Price in Maturity and Expiry phases */}
+                                {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
+                                    <Flex justify="space-between" align="center" mt={2} textAlign="center" fontSize="20px" color="#FEDF56">
+                                        <Text color="gray.400">Final Price: </Text>
+                                        <Text fontWeight="bold" color="white">{finalPrice} USD</Text>
+                                    </Flex>
+                                )}
+
+                                {reward > 0 && currentPhase === Phase.Expiry && (
+                                    <Button
+                                        onClick={claimReward}
+                                        colorScheme="yellow"
+                                        bg="#FEDF56"
+                                        color="black"
+                                        _hover={{ bg: "#FFE56B" }}
                                         isDisabled={reward === 0}
-                                        borderRadius="full"
+                                        width="100%"
+                                        mt={4}
                                     >
                                         Claim {reward.toFixed(4)} ICP
                                     </Button>
                                 )}
-                            </HStack>
-                        </HStack>
-                    )}
+                            </Box>
 
-                    {authenticated ? (
-                        <>
-                            <VStack spacing={8} alignItems="center">
-                                <Box
-                                    border="2px solid #FEDF56"
+                            <Box
+                                bg="gray.800"
+                                p={4}
+                                borderRadius="xl"
+                                mb={4}
+                                borderWidth={1}
+                                borderColor="gray.700"
+                            >
+                                {/* LONG/SHORT Ratio */}
+                                <Flex
+                                    align="center"
+                                    w="100%"
+                                    h="25px"
                                     borderRadius="full"
-                                    padding="20px"
-                                    width="100%"
-                                    textAlign="center"
+                                    bg="gray.800"
+                                    border="1px solid"
+                                    borderColor="gray.600"
+                                    position="relative"
+                                    overflow="hidden"
+                                    boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                                    mb={4}
                                 >
-                                    <Box textAlign="center">
-                                        <Text fontSize="4xl" fontWeight="bold">
-                                            {getDisplayPrice()}
-                                        </Text>
+                                    {/* LONG Section */}
+                                    <Box
+                                        width={`${longPercentage}%`}
+                                        bgGradient="linear(to-r, #0f0c29, #00ff87)"
+                                        transition="width 0.6s ease"
+                                        h="full"
+                                        display="flex"
+                                        alignItems="center"
+                                        justifyContent="flex-end"
+                                        pr={3}
+                                        position="relative"
+                                        zIndex={1}
+                                    >
+                                        {longPercentage > 8 && (
+                                            <Text
+                                                fontSize="sm"
+                                                fontWeight="bold"
+                                                color="whiteAlpha.800"
+                                            >
+                                                {longPercentage.toFixed(0)}%
+                                            </Text>
+                                        )}
                                     </Box>
-                                </Box>
-                                <VStack spacing={2}>
-                                    <Text fontSize="lg">Current Phase: {Phase[currentPhase]}</Text>
-                                    <Text fontSize="lg">Total Deposited: {totalDeposited.toFixed(4)} ICP</Text>
-                                    {endTimestamp && (
-                                        <Text
-                                            fontSize="lg"
-                                            color={formatTimeRemaining(endTimestamp) === "Expired" ? "red.500" : "#FEDF56"}
-                                        >
-                                            {formatTimeRemaining(endTimestamp) === "Expired"
-                                                ? "Market Expired"
-                                                : `Expires in: ${formatTimeRemaining(endTimestamp)}`
-                                            }
-                                        </Text>
-                                    )}
-                                </VStack>
 
-                                <VStack spacing={8} width="100%">
-                                    <Input
-                                        placeholder="Enter bid amount in ICP"
-                                        value={bidAmount}
-                                        onChange={(e) => {
-                                            const value = e.target.value;
-                                            if (/^\d*\.?\d*$/.test(value)) setBidAmount(value);
-                                        }}
-                                        color="#FEDF56"
-                                        bg="transparent"
-                                        border="none"
-                                        textAlign="center"
-                                        _placeholder={{ color: "#FEDF56" }}
-                                        size="lg"
-                                        fontSize="xl"
-                                    />
-
-                                    <Flex justify="center" gap="100px">
-                                        <Button
-                                            onClick={() => handleBid(Side.Long, Number(bidAmount))}
-                                            isDisabled={!bidAmount || Number(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
-                                            bg="#FEDF56"
-                                            color="black"
-                                            _hover={{ bg: "#D5D5D5", color: "green", transform: "scale(1.2)" }}
-                                            width="120px"
-                                            height="50px"
-                                            fontSize="xl"
-                                            transition="all 0.2s"
-                                            borderRadius="full"
-                                        >
-                                            Up
-                                        </Button>
-                                        <Button
-                                            onClick={() => handleBid(Side.Short, Number(bidAmount))}
-                                            isDisabled={!bidAmount || Number(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
-                                            bg="#FEDF56"
-                                            color="black"
-                                            _hover={{ bg: "#D5D5D5", color: "red", transform: "scale(1.2)" }}
-                                            width="120px"
-                                            height="50px"
-                                            fontSize="xl"
-                                            transition="all 0.2s"
-                                            borderRadius="full"
-                                        >
-                                            Down
-                                        </Button>
-                                    </Flex>
-
-                                    <Box marginTop="20px" width="100%">
-                                        <TableContainer
-                                            borderRadius="xl"
-                                            overflow="hidden"
-                                            border="1px solid rgba(254, 223, 86, 0.3)"
-                                            bg="rgba(0, 0, 0, 0.5)"
-                                            width="100%"
-                                        >
-                                            <Table variant="unstyled" width="100%">
-                                                <Thead bg="rgba(17, 22, 11, 0.7)">
-                                                    <Tr>
-                                                        <Th
-                                                            color="#FEDF56"
-                                                            width="33%"
-                                                            textAlign="left"
-                                                            borderBottom="none"
-                                                            py={4}
-                                                            px={6}
-                                                            fontWeight="semibold"
-                                                        >
-                                                            Position
-                                                        </Th>
-                                                        <Th
-                                                            color="#FEDF56"
-                                                            width="33%"
-                                                            textAlign="center"
-                                                            borderBottom="none"
-                                                            py={4}
-                                                            fontWeight="semibold"
-                                                        >
-                                                            Your Bid
-                                                        </Th>
-                                                        <Th
-                                                            color="#FEDF56"
-                                                            width="33%"
-                                                            textAlign="center"
-                                                            borderBottom="none"
-                                                            py={4}
-                                                            pr={6}
-                                                            fontWeight="semibold"
-                                                        >
-                                                            Total Market
-                                                        </Th>
-                                                    </Tr>
-                                                </Thead>
-                                                <Tbody>
-                                                    <Tr>
-                                                        <Td
-                                                            color="#FEDF56"
-                                                            fontWeight="medium"
-                                                            py={4}
-                                                            px={6}
-                                                            borderTop="1px solid rgba(0, 0, 0, 0.3)"
-                                                        >
-                                                            Long
-                                                        </Td>
-                                                        <Td
-                                                            color="#FEDF56"
-                                                            textAlign="center"
-                                                            py={4}
-                                                            borderTop="1px solid rgba(0, 0, 0, 0.3)"
-                                                        >
-                                                            {positions.long.toFixed(4)} ICP
-                                                        </Td>
-                                                        <Td
-                                                            color="#FEDF56"
-                                                            textAlign="center"
-                                                            py={4}
-                                                            pr={6}
-                                                            borderTop="1px solid rgba(0, 0, 0, 0.3)"
-                                                        >
-                                                            {totalMarketPositions.long.toFixed(4)} ICP
-                                                        </Td>
-                                                    </Tr>
-                                                    <Tr>
-                                                        <Td
-                                                            color="#FEDF56"
-                                                            fontWeight="medium"
-                                                            py={4}
-                                                            px={6}
-                                                            borderTop="1px solid rgba(0, 0, 0, 0.3)"
-                                                        >
-                                                            Short
-                                                        </Td>
-                                                        <Td
-                                                            color="#FEDF56"
-                                                            textAlign="center"
-                                                            py={4}
-                                                            borderTop="1px solid rgba(0, 0, 0, 0.3)"
-                                                        >
-                                                            {positions.short.toFixed(4)} ICP
-                                                        </Td>
-                                                        <Td
-                                                            color="#FEDF56"
-                                                            textAlign="center"
-                                                            py={4}
-                                                            pr={6}
-                                                            borderTop="1px solid rgba(0, 0, 0, 0.3)"
-                                                        >
-                                                            {totalMarketPositions.short.toFixed(4)} ICP
-                                                        </Td>
-                                                    </Tr>
-                                                </Tbody>
-                                            </Table>
-                                        </TableContainer>
+                                    {/* SHORT Section */}
+                                    <Box
+                                        position="absolute"
+                                        right="0"
+                                        top="0"
+                                        h="100%"
+                                        width={`${shortPercentage}%`}
+                                        bgGradient="linear(to-r, #ff512f, #dd2476)"
+                                        transition="width 0.6s ease"
+                                        display="flex"
+                                        alignItems="center"
+                                        justifyContent="flex-start"
+                                        pl={3}
+                                        zIndex={0}
+                                    >
+                                        {shortPercentage > 8 && (
+                                            <Text
+                                                fontSize="sm"
+                                                fontWeight="bold"
+                                                color="whiteAlpha.800"
+                                            >
+                                                {shortPercentage.toFixed(0)}%
+                                            </Text>
+                                        )}
                                     </Box>
-                                </VStack>
-                            </VStack>
-                        </>
-                    ) : (
-                        <Button
-                            onClick={() => signIn()}
-                            backgroundColor="#FEDF56"
-                            color="#5D3A1A"
-                            _hover={{ backgroundColor: "#D5D5D5" }}
-                            padding="25px"
-                            borderRadius="full"
-                            fontWeight="bold"
-                            fontSize="xl"
-                            w="full"
-                        >
-                            Login
-                        </Button>
-                    )}
-                </VStack>
+                                </Flex>
+
+                                <Text textAlign="center" fontSize="md" mb={4} color="gray.400">You're betting</Text>
+
+                                <Input
+                                    placeholder="Enter bid amount in ICP"
+                                    value={bidAmount}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (/^\d*\.?\d*$/.test(value)) setBidAmount(value);
+                                    }}
+                                    color="#FEDF56"
+                                    bg="transparent"
+                                    border="1px solid"
+                                    borderColor="gray.600"
+                                    textAlign="center"
+                                    _placeholder={{ color: "gray.500" }}
+                                    size="lg"
+                                    mb={4}
+                                />
+
+                                <Button
+                                    onClick={() => handleBid(Side.Long, Number(bidAmount))}
+                                    isDisabled={!bidAmount || Number(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
+                                    bg="#00ff87"
+                                    color="black"
+                                    _hover={{ opacity: 0.8 }}
+                                    width="100%"
+                                    mb={2}
+                                >
+                                    LONG
+                                </Button>
+
+                                <Button
+                                    onClick={() => handleBid(Side.Short, Number(bidAmount))}
+                                    isDisabled={!bidAmount || Number(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
+                                    bg="#ff416c"
+                                    color="white"
+                                    _hover={{ opacity: 0.8 }}
+                                    width="100%"
+                                >
+                                    SHORT
+                                </Button>
+
+                                <Divider my={4} />
+
+                                <Text fontSize="sm" color="gray.400" mb={1}>Pot. profit: {totalDeposited > 0 ? "0.0000 -> 0.0000 ICP" : "N/A"}</Text>
+                                <Text fontSize="sm" color="gray.400" mb={4}>Fee: 6.8%</Text>
+
+                                <Text fontSize="md" fontWeight="bold" color="white" mb={2}>Your Position</Text>
+                                <HStack justify="space-between" mb={1}>
+                                    <Text color="#00ff87">LONG:</Text>
+                                    <Text color="white">{positions.long.toFixed(4)} ICP</Text>
+                                </HStack>
+                                <HStack justify="space-between">
+                                    <Text color="#ff416c">SHORT:</Text>
+                                    <Text color="white">{positions.short.toFixed(4)} ICP</Text>
+                                </HStack>
+                            </Box>
+
+                            <Box
+                                bg="gray.800"
+                                p={4}
+                                borderRadius="xl"
+                                borderWidth={1}
+                                borderColor="gray.700"
+                            >
+                                <Text fontSize="md" fontWeight="bold" color="white" mb={3}>My Holdings</Text>
+                                <Button
+                                    colorScheme="blue"
+                                    variant="outline"
+                                    size="sm"
+                                    width="100%"
+                                    rightIcon={<FaArrowDown />}
+                                >
+                                    Make your first Prediction Market
+                                </Button>
+                            </Box>
+                        </Box>
+                    </Flex>
+                </>
             )}
             {showResult && (
                 <Box

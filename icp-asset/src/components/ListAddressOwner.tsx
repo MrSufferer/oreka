@@ -35,6 +35,8 @@ interface ContractData {
     maturityTime: string;
     tradingPair: string;
     owner: string;
+    indexBg?: string;
+    currentPrice?: number;
 }
 
 enum Phase { Trading, Bidding, Maturity, Expiry }
@@ -115,27 +117,41 @@ const formatTimeRemaining = (maturityTime: any) => {
 };
 
 // Get market title
-const getMarketTitle = (tradingPair: string, strikePrice: string) => {
-    if (!tradingPair || !strikePrice) return "Unknown Market";
-    const formattedStrikePrice = parseFloat(strikePrice).toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-    return `${tradingPair} @ $${formattedStrikePrice}`;
+const getMarketTitle = (contract: ContractData) => {
+    try {
+        // Format trading pair
+        const pair = contract.tradingPair.replace('/', '-');
+
+        // Format maturity time
+        const timestamp = Number(contract.maturityTime);
+        if (isNaN(timestamp) || timestamp === 0) return `${pair} Market`;
+
+        const date = new Date(timestamp * 1000);
+        const maturityTimeFormatted = format(date, 'MMM d, yyyy h:mm a');
+
+        // Format strike price
+        const strikePriceFormatted = parseFloat(contract.strikePrice).toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+
+        return `${pair} will reach $${strikePriceFormatted} by ${maturityTimeFormatted} ?`;
+    } catch (error) {
+        console.error("Error getting market title:", error);
+        return "Unknown Market";
+    }
 };
 
-// Get background image based on trading pair
-const getBackgroundImage = (tradingPair: string) => {
-    switch (tradingPair) {
-        case 'BTC/USD':
-            return "url('/images/btc-logo.png')";
-        case 'ETH/USD':
-            return "url('/images/eth-logo.png')";
-        case 'ICP/USD':
-            return "url('/images/icp-logo.png')";
-        default:
-            return "none";
-    }
+// Clean up market titles
+const cleanupMarketTitle = (title: string) => {
+    // Remove any string within parentheses containing timestamp references
+    return title.replace(/\([^)]*Sat[^)]*\)/g, '').trim();
+};
+
+// Shorten address for display
+const shortenAddress = (address: string) => {
+    if (!address) return '';
+    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
 };
 
 function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
@@ -146,6 +162,11 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
     const [totalPages, setTotalPages] = useState(1);
     const [identityPrincipal, setIdentityPrincipal] = useState("");
     const [marketService, setMarketService] = useState<BinaryOptionMarketService | null>(null);
+    const [currentTab, setCurrentTab] = useState<string>('All Markets');
+    const [contractPercentages, setContractPercentages] = useState<{ [key: string]: { long: number, short: number } }>({});
+    const [contractImageIndices, setContractImageIndices] = useState<{ [key: string]: number }>({});
+    const [countdowns, setCountdowns] = useState<{ [key: string]: string }>({});
+    const [balance, setBalance] = useState("0");
 
     const CONTRACTS_PER_PAGE = 10;
     const router = useRouter();
@@ -159,27 +180,52 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
         if (marketService) {
             fetchContracts();
         }
-    }, [page, marketService]);
+    }, [page, marketService, currentTab]);
 
     // Initialize identity and market service
     const initIdentity = async () => {
         try {
+            setIsLoading(true);
             const authClient = await AuthClient.create();
-            const identity = authClient.getIdentity();
             const isAuthenticated = await authClient.isAuthenticated();
 
             if (isAuthenticated) {
+                const identity = authClient.getIdentity();
                 setIdentityPrincipal(identity.getPrincipal().toText());
                 const service = BinaryOptionMarketService.getInstance();
                 await service.initialize();
                 setMarketService(service);
+
+                // Also initialize ICP ledger service for balance
+                try {
+                    const { IcpLedgerService } = await import('../service/icp-ledger-service');
+                    const { setIcpLedgerIdentity } = await import('../service/actor-locator');
+
+                    await setIcpLedgerIdentity(identity);
+                    const ledgerService = IcpLedgerService.getInstance();
+                    await ledgerService.initialize();
+
+                    // Get balance
+                    const userBalance = await ledgerService.getBalance({
+                        owner: identity.getPrincipal(),
+                        subaccount: []
+                    });
+                    setBalance((Number(userBalance) / 10e7).toFixed(4));
+                } catch (balanceError) {
+                    console.error("Error fetching balance:", balanceError);
+                    // Don't set error state for balance issues
+                }
             } else {
-                setError("Please connect your wallet first");
-                setIsLoading(false);
+                // Don't treat authentication failure as an error
+                // Just set identity principal to empty and continue
+                setIdentityPrincipal("");
+                console.log("User is not authenticated");
             }
         } catch (error) {
             console.error("Error initializing identity:", error);
             setError("Failed to initialize. Please try again.");
+        } finally {
+            // Always set loading to false regardless of outcome
             setIsLoading(false);
         }
     };
@@ -213,7 +259,7 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
             const paginatedMarkets = allMarkets.slice(startIdx, endIdx);
 
             // Transform market data
-            const contractDataPromises = paginatedMarkets.map(async (marketId: string) => {
+            const contractDataPromises = paginatedMarkets.map(async (marketId: string, index) => {
                 const marketDetails = await marketService.getMarketDetails(marketId);
 
                 // Parse phase
@@ -228,7 +274,17 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                     phase = Phase.Expiry;
                 }
 
-                // Format data for UI
+                // Get current price for trading pair if available
+                let currentPrice;
+                try {
+                    if (marketService && marketDetails.tradingPair) {
+                        currentPrice = await marketService.getPrice(marketDetails.tradingPair);
+                    }
+                } catch (error) {
+                    console.error(`Error getting price for ${marketDetails.tradingPair}:`, error);
+                }
+
+                // Format data for UI with price included
                 return {
                     address: marketId,
                     createDate: marketDetails.createTimestamp ? new Date(Number(marketDetails.createTimestamp) * 1000).toISOString() : '',
@@ -238,20 +294,118 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                     phase: phase,
                     maturityTime: marketDetails.endTimestamp ? marketDetails.endTimestamp.toString() : '0',
                     tradingPair: marketDetails.tradingPair || 'ICP/USD',
-                    owner: marketDetails.owner ? marketDetails.owner.toString() : ''
+                    owner: marketDetails.owner ? marketDetails.owner.toString() : '',
+                    indexBg: (index % 5 + 1).toString(), // Assign a random image index (1-5)
+                    currentPrice: currentPrice
                 };
             });
 
             const contractDataList = await Promise.all(contractDataPromises);
-            setContracts(contractDataList);
+
+            // Filter contracts based on current tab
+            const filteredContractList = contractDataList.filter(contract => {
+                if (currentTab === 'All Markets') return true;
+                if (currentTab === 'Most recent') return true; // Will be sorted later
+                if (currentTab === 'Quests') return contract.phase === Phase.Trading || contract.phase === Phase.Bidding;
+                if (currentTab === 'Results') return contract.phase === Phase.Maturity || contract.phase === Phase.Expiry;
+                return contract.tradingPair === currentTab; // Filter by trading pair
+            });
+
+            // Sort by creation date if "Most recent" tab
+            if (currentTab === 'Most recent') {
+                filteredContractList.sort((a, b) => {
+                    return new Date(b.createDate).getTime() - new Date(a.createDate).getTime();
+                });
+            }
+
+            setContracts(filteredContractList);
             setTotalContracts(allMarkets.length);
             setTotalPages(Math.ceil(allMarkets.length / CONTRACTS_PER_PAGE));
+
+            // Calculate percentages for each contract
+            const newPercentages: { [key: string]: { long: number, short: number } } = {};
+            filteredContractList.forEach(contract => {
+                const longAmount = parseFloat(contract.longAmount || '0');
+                const shortAmount = parseFloat(contract.shortAmount || '0');
+                const total = longAmount + shortAmount;
+
+                if (total > 0) {
+                    const longPercent = (longAmount / total) * 100;
+                    const shortPercent = (shortAmount / total) * 100;
+
+                    newPercentages[contract.address] = {
+                        long: longPercent,
+                        short: shortPercent
+                    };
+                } else {
+                    // Default to 50/50 if no amounts are present
+                    newPercentages[contract.address] = {
+                        long: 50,
+                        short: 50
+                    };
+                }
+            });
+            setContractPercentages(newPercentages);
+
+            // Set image indices for contracts
+            const newImageIndices: { [key: string]: number } = {};
+            filteredContractList.forEach(contract => {
+                const bgIndex = contract.indexBg ? parseInt(contract.indexBg) : 1;
+                newImageIndices[contract.address] = bgIndex;
+            });
+            setContractImageIndices(newImageIndices);
+
+            // Start countdown timers
+            updateCountdowns(filteredContractList);
+
             setIsLoading(false);
         } catch (error) {
             console.error("Error fetching contracts:", error);
             setError("Failed to fetch markets. Please try again.");
             setIsLoading(false);
         }
+    };
+
+    // Update countdowns for all contracts
+    const updateCountdowns = (contracts: ContractData[]) => {
+        const newCountdowns: { [key: string]: string } = {};
+
+        contracts.forEach(contract => {
+            const timestamp = Number(contract.maturityTime);
+            if (!isNaN(timestamp) && timestamp > 0) {
+                if (isTimestampPassed(timestamp)) {
+                    newCountdowns[contract.address] = "Ended";
+                } else {
+                    newCountdowns[contract.address] = formatTimeRemaining(timestamp);
+                }
+            } else {
+                newCountdowns[contract.address] = "Unknown";
+            }
+        });
+
+        setCountdowns(newCountdowns);
+
+        // Set interval to update countdowns every second
+        const intervalId = setInterval(() => {
+            const updatedCountdowns: { [key: string]: string } = {};
+
+            contracts.forEach(contract => {
+                const timestamp = Number(contract.maturityTime);
+                if (!isNaN(timestamp) && timestamp > 0) {
+                    if (isTimestampPassed(timestamp)) {
+                        updatedCountdowns[contract.address] = "Ended";
+                    } else {
+                        updatedCountdowns[contract.address] = formatTimeRemaining(timestamp);
+                    }
+                } else {
+                    updatedCountdowns[contract.address] = "Unknown";
+                }
+            });
+
+            setCountdowns(updatedCountdowns);
+        }, 1000);
+
+        return () => clearInterval(intervalId);
     };
 
     // Navigate to contract details
@@ -266,175 +420,360 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
         }
     };
 
-    // Calculate total pool amount
-    const calculateTotalPool = (longAmount: string, shortAmount: string) => {
-        const longValue = parseFloat(longAmount) || 0;
-        const shortValue = parseFloat(shortAmount) || 0;
-        return (longValue + shortValue).toFixed(4);
-    };
-
-    // Format creation date
-    const formatCreateDate = (dateString: string) => {
-        try {
-            return format(new Date(dateString), 'MMM d, yyyy');
-        } catch (error) {
-            return "Unknown";
-        }
+    // Get trading pair icon
+    const getTradingPairIcon = (tradingPair: string) => {
+        if (tradingPair.includes("BTC")) return SiBitcoinsv;
+        if (tradingPair.includes("ETH")) return FaEthereum;
+        if (tradingPair.includes("ICP")) return GoInfinity;
+        return FaCoins;
     };
 
     return (
-        <Box p={4} maxWidth="1200px" mx="auto">
-            <VStack spacing={4} align="stretch">
-                <Flex justifyContent="space-between" alignItems="center" mb={4}>
-                    <Text fontSize="2xl" fontWeight="bold">Binary Option Markets</Text>
-                    <HStack>
-                        <Text>Page {page} of {totalPages}</Text>
-                        <Button
-                            isDisabled={page <= 1}
-                            onClick={() => handlePageChange(page - 1)}
-                            size="sm"
+        <Box bg="black" minH="100vh">
+            {/* Application header with wallet connection status */}
+            <Flex
+                as="header"
+                align="center"
+                justify="space-between"
+                p={4}
+                bg="black"
+                borderBottom="1px"
+                borderColor="gray.800"
+                position="sticky"
+                top="0"
+                zIndex="sticky"
+                boxShadow="sm"
+            >
+                {/* Platform logo/name */}
+                <Text fontSize="xl" fontWeight="bold" color="#FEDF56">
+                    OREKA
+                </Text>
+
+                <Spacer />
+                {/* Wallet information display */}
+                {identityPrincipal ? (
+                    <HStack spacing={4}>
+                        {/* ICP balance display */}
+                        <HStack
+                            p={2}
+                            bg="gray.900"
+                            borderRadius="md"
+                            borderWidth="1px"
+                            borderColor="gray.700"
                         >
-                            Previous
-                        </Button>
+                            <Icon as={GoInfinity} color="#29ABE2" />
+                            <Text color="white" fontWeight="medium">
+                                {balance} ICP
+                            </Text>
+                        </HStack>
+                        {/* Principal ID (shortened) */}
                         <Button
-                            isDisabled={page >= totalPages}
-                            onClick={() => handlePageChange(page + 1)}
-                            size="sm"
+                            leftIcon={<FaWallet />}
+                            bgGradient="linear(to-r, #2575fc, #6a11cb)"
+                            variant="solid"
+                            size="md"
+                            color="white"
                         >
-                            Next
+                            {shortenAddress(identityPrincipal)}
                         </Button>
                     </HStack>
-                </Flex>
+                ) : (
+                    <Button
+                        leftIcon={<FaWallet />}
+                        bgGradient="linear(to-r, #2575fc, #6a11cb)"
+                        size="md"
+                        onClick={initIdentity}
+                        color="white"
+                    >
+                        Connect Wallet
+                    </Button>
+                )}
+            </Flex>
+
+            <Box p={6}>
+                {/* Header with tabs */}
+                <Box mb={6}>
+                    {/* Horizontally scrollable tab navigation */}
+                    <Flex
+                        overflowX="auto"
+                        pb={2}
+                        mb={4}
+                        css={{
+                            '&::-webkit-scrollbar': {
+                                height: '8px',
+                            },
+                            '&::-webkit-scrollbar-thumb': {
+                                backgroundColor: 'rgba(254,223,86,0.2)',
+                                borderRadius: '4px',
+                            }
+                        }}
+                    >
+                        <HStack spacing={4}>
+                            {/* List of tabs */}
+                            {['All Markets', 'Most recent', 'Quests', 'Results', 'BTC/USD', 'ETH/USD', 'ICP/USD'].map((tab) => (
+                                <Button
+                                    key={tab}
+                                    size="md"
+                                    variant={currentTab === tab ? "solid" : "ghost"}
+                                    colorScheme={currentTab === tab ? "yellow" : "gray"}
+                                    onClick={() => setCurrentTab(tab)}
+                                    minW="120px"
+                                    leftIcon={
+                                        tab === 'All Markets' ? <FaListAlt /> :
+                                            tab === 'Most recent' ? <FaCalendarDay /> :
+                                                tab === 'Quests' ? <FaPlayCircle /> :
+                                                    tab === 'Results' ? <FaTrophy /> :
+                                                        tab === 'BTC/USD' ? <SiBitcoinsv /> :
+                                                            tab === 'ETH/USD' ? <FaEthereum /> :
+                                                                <GoInfinity />
+                                    }
+                                    color={currentTab === tab ? "#1A202C" : "#FEDF56"}
+                                    _hover={{
+                                        bg: currentTab === tab ? "#FEDF56" : "rgba(254,223,86,0.1)",
+                                        color: currentTab === tab ? "#1A202C" : "#FEDF56"
+                                    }}
+                                >
+                                    {tab}
+                                </Button>
+                            ))}
+                        </HStack>
+                    </Flex>
+                </Box>
 
                 {isLoading ? (
                     <Flex justify="center" align="center" h="300px">
-                        <Spinner size="xl" />
+                        <Spinner size="xl" color="#FEDF56" />
                     </Flex>
                 ) : error ? (
-                    <Box textAlign="center" p={8} borderWidth={1} borderRadius="lg">
-                        <Text color="red.500">{error}</Text>
-                        <Button mt={4} onClick={fetchContracts}>Retry</Button>
+                    <Box textAlign="center" p={8} borderWidth={1} borderRadius="lg" borderColor="gray.700" bg="gray.900">
+                        <Text color="red.400">{error}</Text>
+                        <Button mt={4} onClick={fetchContracts} colorScheme="yellow">Retry</Button>
                     </Box>
-                ) : contracts.length === 0 ? (
-                    <Box textAlign="center" p={8} borderWidth={1} borderRadius="lg">
-                        <Text>No markets found</Text>
-                    </Box>
-                ) : (
-                    <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={6}>
+                ) : contracts.length > 0 ? (
+                    <SimpleGrid
+                        columns={{ base: 1, md: 2, lg: 3, xl: 4 }}
+                        spacing={4}
+                        width="100%"
+                    >
                         {contracts.map((contract, index) => (
                             <Box
                                 key={contract.address}
-                                p={4}
-                                borderWidth={1}
+                                p="2px"
                                 borderRadius="lg"
+                                background="linear-gradient(135deg, #00c6ff, #0072ff, #6a11cb, #2575fc)" // Gradient border
+                                transition="transform 0.2s"
+                                _hover={{ transform: 'translateY(-4px)' }}
                                 cursor="pointer"
-                                onClick={() => handleContractClick(contract.address)}
-                                transition="all 0.3s"
-                                _hover={{ transform: 'scale(1.02)', boxShadow: 'lg' }}
-                                position="relative"
-                                overflow="hidden"
-                                bgGradient="linear(to-br, gray.800, gray.900)"
                             >
-                                {/* Background Icon */}
                                 <Box
-                                    position="absolute"
-                                    right="-20px"
-                                    bottom="-20px"
-                                    width="120px"
-                                    height="120px"
-                                    opacity="0.1"
-                                    backgroundImage={getBackgroundImage(contract.tradingPair)}
-                                    backgroundSize="contain"
-                                    backgroundRepeat="no-repeat"
-                                    backgroundPosition="center"
-                                />
-
-                                {/* Market Status Tag */}
-                                <HStack position="absolute" top={2} right={2}>
-                                    <Flex
-                                        bg={getPhaseColor(contract.phase)}
-                                        color="white"
-                                        px={2}
-                                        py={1}
-                                        borderRadius="md"
-                                        fontSize="xs"
-                                        alignItems="center"
-                                    >
-                                        <Icon as={FaRegClock} mr={1} />
-                                        {getPhaseName(contract.phase)}
-                                    </Flex>
-                                </HStack>
-
-                                {/* Market Title */}
-                                <Text fontWeight="bold" fontSize="lg" mb={2}>
-                                    {getMarketTitle(contract.tradingPair, contract.strikePrice)}
-                                </Text>
-
-                                {/* Time Info */}
-                                <HStack fontSize="sm" color="gray.300" mb={3}>
-                                    <Icon as={FaCalendarDay} />
-                                    <Text>Created: {formatCreateDate(contract.createDate)}</Text>
-                                </HStack>
-
-                                <HStack fontSize="sm" color="gray.300" mb={3}>
-                                    <Icon as={FaClock} />
-                                    <Text>
-                                        {isMarketEnded(contract.maturityTime, contract.phase) ? (
-                                            "Market has ended"
-                                        ) : (
-                                            `Ends: ${formatTimeRemaining(contract.maturityTime)}`
-                                        )}
-                                    </Text>
-                                </HStack>
-
-                                {/* Pool Information */}
-                                <Text fontSize="sm" fontWeight="medium" mb={1}>Total Pool: {calculateTotalPool(contract.longAmount, contract.shortAmount)} ICP</Text>
-
-                                <Flex mb={3} alignItems="center">
-                                    {/* UP Side */}
-                                    <Box flex="1">
-                                        <Flex alignItems="center">
-                                            <Icon as={FaArrowUp} color="green.400" mr={1} />
-                                            <Text fontSize="sm" color="green.400">UP</Text>
-                                            <Spacer />
-                                            <Text fontSize="sm">{parseFloat(contract.longAmount).toFixed(2)}</Text>
-                                        </Flex>
-                                    </Box>
-
-                                    <Box width="8px" />
-
-                                    {/* DOWN Side */}
-                                    <Box flex="1">
-                                        <Flex alignItems="center">
-                                            <Icon as={FaArrowDown} color="red.400" mr={1} />
-                                            <Text fontSize="sm" color="red.400">DOWN</Text>
-                                            <Spacer />
-                                            <Text fontSize="sm">{parseFloat(contract.shortAmount).toFixed(2)}</Text>
-                                        </Flex>
-                                    </Box>
-                                </Flex>
-
-                                {/* Progress Bar */}
-                                <Box mt={2}>
-                                    <Flex>
-                                        <Box flex={parseFloat(contract.longAmount) || 0.001} height="8px" bg="green.400" borderLeftRadius="full" />
-                                        <Box flex={parseFloat(contract.shortAmount) || 0.001} height="8px" bg="red.400" borderRightRadius="full" />
-                                    </Flex>
-                                </Box>
-
-                                {/* View Details Button */}
-                                <Button
-                                    mt={4}
-                                    size="sm"
-                                    width="full"
-                                    colorScheme="blue"
-                                    variant="outline"
+                                    borderRadius="md"
+                                    overflow="hidden"
+                                    boxShadow="md"
+                                    bg="#1A202C"
+                                    onClick={() => handleContractClick(contract.address)}
                                 >
-                                    View Details
-                                </Button>
+                                    {/* Image section */}
+                                    <Box
+                                        h="230px"
+                                        w="100%"
+                                        display="flex"
+                                        justifyContent="center"
+                                        alignItems="center"
+                                        bg="#151A23"
+                                        p={1}
+                                        position="relative"
+                                    >
+                                        <Image
+                                            src={`/images/${contract.tradingPair.split('/')[0].toLowerCase()}/${contract.tradingPair.split('/')[0].toLowerCase()}${contractImageIndices[contract.address] || 1}.png`}
+                                            alt={contract.tradingPair}
+                                            w="100%"
+                                            h="100%"
+                                            objectFit="cover"
+                                            position="relative"
+                                            fallback={
+                                                <Box
+                                                    h="100%"
+                                                    w="100%"
+                                                    bg="#1A202C"
+                                                    display="flex"
+                                                    alignItems="center"
+                                                    justifyContent="center"
+                                                >
+                                                    <Icon
+                                                        as={getTradingPairIcon(contract.tradingPair)}
+                                                        boxSize="50px"
+                                                        color="blue.300"
+                                                    />
+                                                </Box>
+                                            }
+                                        />
+                                        <Box
+                                            display="inline-block"
+                                            bg={getPhaseColor(contract.phase)}
+                                            color="white"
+                                            px={3}
+                                            py={1}
+                                            borderRadius="md"
+                                            fontSize="sm"
+                                            fontWeight="bold"
+                                            mb={2}
+                                            position="absolute"
+                                            bottom="3px"
+                                            left="7px"
+                                        >
+                                            {getPhaseName(contract.phase)}
+                                        </Box>
+                                    </Box>
+
+                                    {/* Info section */}
+                                    <Box p={3}>
+                                        {/* Market title */}
+                                        <Text fontWeight="bold" mb={1} color="white" fontSize="xl">
+                                            {cleanupMarketTitle(getMarketTitle(contract))}
+                                        </Text>
+
+                                        {/* LONG/SHORT ratio */}
+                                        <Flex
+                                            align="center"
+                                            w="100%"
+                                            h="25px"
+                                            borderRadius="full"
+                                            bg="gray.800"
+                                            border="1px solid"
+                                            borderColor="gray.600"
+                                            position="relative"
+                                            overflow="hidden"
+                                            boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                                            mb={4}
+                                        >
+                                            {/* LONG Section */}
+                                            <Box
+                                                width={`${contractPercentages[contract.address]?.long}%`}
+                                                bgGradient="linear(to-r, #0f0c29, #00ff87)"
+                                                transition="width 0.6s ease"
+                                                h="full"
+                                                display="flex"
+                                                alignItems="center"
+                                                justifyContent="flex-end"
+                                                pr={3}
+                                                position="relative"
+                                                zIndex={1}
+                                            >
+                                                {contractPercentages[contract.address]?.long > 8 && (
+                                                    <Text
+                                                        fontSize="sm"
+                                                        fontWeight="bold"
+                                                        color="whiteAlpha.800"
+                                                    >
+                                                        {contractPercentages[contract.address]?.long.toFixed(0)}%
+                                                    </Text>
+                                                )}
+                                            </Box>
+
+                                            {/* SHORT Section (in absolute layer for smooth overlap) */}
+                                            <Box
+                                                position="absolute"
+                                                right="0"
+                                                top="0"
+                                                h="100%"
+                                                width={`${contractPercentages[contract.address]?.short}%`}
+                                                bgGradient="linear(to-r, #ff512f, #dd2476)"
+                                                transition="width 0.6s ease"
+                                                display="flex"
+                                                alignItems="center"
+                                                justifyContent="flex-start"
+                                                pl={3}
+                                                zIndex={0}
+                                            >
+                                                {contractPercentages[contract.address]?.short > 8 && (
+                                                    <Text
+                                                        fontSize="sm"
+                                                        fontWeight="bold"
+                                                        color="whiteAlpha.800"
+                                                    >
+                                                        {contractPercentages[contract.address]?.short.toFixed(0)}%
+                                                    </Text>
+                                                )}
+                                            </Box>
+                                        </Flex>
+
+                                        <Flex justify="space-between" align="center" mb={2}>
+                                            <Box>
+                                                <Button fontSize="sm"
+                                                    color="#1E4146"
+                                                    textAlign="right"
+                                                    w="120px"
+                                                    h="45px"
+                                                    borderRadius="full"
+                                                    bg="#1B3B3F"
+                                                    border="1px solid"
+                                                    borderColor="gray.600"
+                                                    boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                                                    textColor="#20BCBB"
+                                                    _hover={{
+                                                        bg: "green.500",
+                                                        color: "white",
+                                                    }}
+                                                >
+                                                    LONG
+                                                </Button>
+                                            </Box>
+                                            <Box>
+                                                <Button fontSize="sm"
+                                                    color="#3D243A"
+                                                    textAlign="right"
+                                                    w="120px"
+                                                    h="45px"
+                                                    borderRadius="full"
+                                                    bg="#3D243A"
+                                                    border="1px solid"
+                                                    borderColor="gray.600"
+                                                    textColor="#FF6492"
+                                                    boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                                                    _hover={{
+                                                        bg: "red.500",
+                                                        color: "white",
+                                                    }}
+                                                >
+                                                    SHORT
+                                                </Button>
+                                            </Box>
+                                        </Flex>
+
+                                        <Divider my={4} borderColor="gray.600" />
+
+                                        <Flex justify="space-between" align="center">
+                                            <HStack spacing={2}>
+                                                <Icon
+                                                    as={getTradingPairIcon(contract.tradingPair)}
+                                                    color="blue.300"
+                                                />
+                                                <Text fontWeight="bold" fontSize="lg" color="white">
+                                                    {contract.currentPrice
+                                                        ? `$${contract.currentPrice.toLocaleString(undefined, {
+                                                            maximumFractionDigits: 2,
+                                                        })}`
+                                                        : `$${parseFloat(contract.strikePrice).toLocaleString(undefined, {
+                                                            maximumFractionDigits: 2,
+                                                        })}`}
+                                                </Text>
+                                            </HStack>
+                                            <HStack>
+                                                <Icon as={FaRegClock} color="gray.400" />
+                                                <Text fontSize="sm" color="gray.400" textAlign="right">
+                                                    {countdowns[contract.address] || formatTimeRemaining(contract.maturityTime)}
+                                                </Text>
+                                            </HStack>
+                                        </Flex>
+                                    </Box>
+                                </Box>
                             </Box>
                         ))}
                     </SimpleGrid>
+                ) : (
+                    <Box textAlign="center" p={8} borderWidth={1} borderRadius="lg" borderColor="gray.700" bg="gray.900">
+                        <Text color="gray.400">No markets found</Text>
+                    </Box>
                 )}
 
                 {/* Pagination Controls */}
@@ -444,20 +783,24 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                             <Button
                                 isDisabled={page <= 1}
                                 onClick={() => handlePageChange(page - 1)}
+                                colorScheme="yellow"
+                                variant="outline"
                             >
                                 Previous
                             </Button>
-                            <Text>Page {page} of {totalPages}</Text>
+                            <Text color="white">Page {page} of {totalPages}</Text>
                             <Button
                                 isDisabled={page >= totalPages}
                                 onClick={() => handlePageChange(page + 1)}
+                                colorScheme="yellow"
+                                variant="outline"
                             >
                                 Next
                             </Button>
                         </HStack>
                     </Flex>
                 )}
-            </VStack>
+            </Box>
         </Box>
     );
 }
