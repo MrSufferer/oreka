@@ -580,10 +580,10 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
    */
   useEffect(() => {
     if (optimizedPriceData.length > 0 && strikePrice > 0) {
-        const currentPrice = optimizedPriceData[optimizedPriceData.length - 1].close;
-        const difference = currentPrice - strikePrice;
-        const percentageDifference = (difference / strikePrice) * 100;
-        setPercentDiff(percentageDifference);
+      const currentPrice = optimizedPriceData[optimizedPriceData.length - 1].close;
+      const difference = currentPrice - strikePrice;
+      const percentageDifference = (difference / strikePrice) * 100;
+      setPercentDiff(percentageDifference);
     }
   }, [optimizedPriceData, strikePrice]);
 
@@ -612,8 +612,8 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
               <Text color="white" fontSize="4xl" fontWeight="bold">
                 ${hoverData?.close ? hoverData.close.toFixed(6) : '0.00'}
               </Text>
-              <Text 
-                color={percentDiff >= 0 ? "#00D7B5" : "#FF6384"} 
+              <Text
+                color={percentDiff >= 0 ? "#00D7B5" : "#FF6384"}
                 fontSize="lg"
               >
                 {diffString} ({percentDiff >= 0 ? "+" : ""}{percentDiff.toFixed(2)}%)
@@ -623,17 +623,17 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
             <Flex justify="space-between" align="center">
               {!isLoadingChart && optimizedPriceData.length > 0 ? (
                 // Platform branding/logo
-                <Text 
-                    fontSize="5xl" 
-                    fontWeight="bold" 
-                    bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)" 
-                    bgClip="text"
-                    letterSpacing="wider"
-                    textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
-                    fontFamily="'Orbitron', sans-serif"
-                  >
-                    OREKA
-                  </Text>
+                <Text
+                  fontSize="5xl"
+                  fontWeight="bold"
+                  bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
+                  bgClip="text"
+                  letterSpacing="wider"
+                  textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
+                  fontFamily="'Orbitron', sans-serif"
+                >
+                  OREKA
+                </Text>
               ) : (
                 <Skeleton height="32px" width="120px" />
               )}

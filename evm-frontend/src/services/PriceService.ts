@@ -33,7 +33,7 @@ export class PriceService {
   private maxReconnectAttempts: number = 5;
   private reconnectTimeout: NodeJS.Timeout | null = null;
 
-  private constructor() {}
+  private constructor() { }
 
   public static getInstance(): PriceService {
     if (!PriceService.instance) {
@@ -80,7 +80,7 @@ export class PriceService {
       // Use formatted symbol to fetch price
       const response = await fetch(`https://api.coinbase.com/v2/prices/${coinbaseSymbol}/spot`);
       const data = await response.json();
-      
+
       return {
         price: parseFloat(data.data.amount),
         symbol: chartSymbol,
@@ -113,7 +113,7 @@ export class PriceService {
   public subscribeToWebSocketPrices(callback: (data: PriceData) => void, symbols: string[] = ['BTC-USD']): () => void {
     // Make sure all symbols are in correct format for Coinbase
     const formattedSymbols = symbols.map(symbol => this.formatSymbolForCoinbase(symbol));
-    
+
     // Store subscription for each symbol
     formattedSymbols.forEach(symbol => {
       if (!this.webSocketSubscriptions.has(symbol)) {
@@ -121,10 +121,10 @@ export class PriceService {
       }
       this.webSocketSubscriptions.get(symbol)?.add(callback);
     });
-    
+
     // Initialize WebSocket if not already done
     this.initializeWebSocket(formattedSymbols);
-    
+
     // Fetch initial prices immediately
     formattedSymbols.forEach(async (symbol) => {
       try {
@@ -134,7 +134,7 @@ export class PriceService {
         console.error(`Error fetching initial price for ${symbol}:`, error);
       }
     });
-    
+
     // Return unsubscribe function
     return () => {
       formattedSymbols.forEach(symbol => {
@@ -146,7 +146,7 @@ export class PriceService {
           }
         }
       });
-      
+
       // Close WebSocket if no more subscriptions
       if (this.webSocketSubscriptions.size === 0) {
         this.closeWebSocket();
@@ -167,13 +167,13 @@ export class PriceService {
       this.updateWebSocketSubscriptions();
       return;
     }
-    
+
     // Close existing WebSocket if it exists
     this.closeWebSocket();
-    
+
     // Create new WebSocket connection
     this.webSocket = new WebSocket('wss://ws-feed.exchange.coinbase.com');
-    
+
     this.webSocket.onopen = () => {
       console.log('Coinbase WebSocket connection established');
       this.reconnectAttempts = 0;
@@ -187,19 +187,19 @@ export class PriceService {
     this.webSocket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
         // Handle price updates from ticker messages
         if (data.type === 'ticker' && data.product_id && data.price) {
           const symbol = data.product_id;
           const subscribers = this.webSocketSubscriptions.get(symbol);
-          
+
           if (subscribers) {
             const priceData: PriceData = {
               price: parseFloat(data.price),
               symbol: symbol,
               timestamp: Date.now()
             };
-            
+
             // Notify all subscribers
             subscribers.forEach(callback => {
               try {
@@ -214,12 +214,12 @@ export class PriceService {
         console.error('Error processing WebSocket message:', error);
       }
     };
-    
+
     this.webSocket.onerror = (error) => {
       console.error('Coinbase WebSocket error:', error);
       this.attemptReconnect();
     };
-    
+
     this.webSocket.onclose = (event) => {
       console.log(`Coinbase WebSocket connection closed: ${event.code} ${event.reason}`);
       this.attemptReconnect();
@@ -234,27 +234,27 @@ export class PriceService {
     if (!this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) {
       return;
     }
-    
+
     // Get all unique symbols from subscriptions
     const symbols = Array.from(this.webSocketSubscriptions.keys());
-    
+
     if (symbols.length === 0) {
       this.closeWebSocket();
       return;
     }
-    
+
     // Subscribe to ticker channels for each symbol
     const subscribeMsg = {
       type: 'subscribe',
       product_ids: symbols,
       channels: ['ticker']
     };
-    
+
     // Send subscription message
     this.webSocket.send(JSON.stringify(subscribeMsg));
     console.log('Subscribed to Coinbase WebSocket for:', symbols);
   }
-  
+
   private closeWebSocket(): void {
     if (this.webSocket) {
       try {
@@ -277,7 +277,7 @@ export class PriceService {
         this.webSocket = null;
       }
     }
-    
+
     // Clear any pending reconnect
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
@@ -295,24 +295,24 @@ export class PriceService {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
-    
+
     // Only attempt to reconnect if we have subscriptions
     if (this.webSocketSubscriptions.size === 0) {
       return;
     }
-    
+
     // Check if we've exceeded max reconnect attempts
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error(`Max WebSocket reconnect attempts (${this.maxReconnectAttempts}) reached`);
       return;
     }
-    
+
     // Exponential backoff for reconnect
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
     this.reconnectAttempts++;
-    
+
     console.log(`Attempting to reconnect WebSocket in ${delay}ms (attempt ${this.reconnectAttempts})`);
-    
+
     this.reconnectTimeout = setTimeout(() => {
       // Get all symbols from current subscriptions
       const symbols = Array.from(this.webSocketSubscriptions.keys());
@@ -349,7 +349,7 @@ export class PriceService {
    */
   public unsubscribeFromPriceUpdates(callback: (data: PriceData) => void) {
     this.priceSubscribers = this.priceSubscribers.filter(sub => sub !== callback);
-    
+
     if (this.priceSubscribers.length === 0 && this.currentInterval) {
       clearInterval(this.currentInterval);
       this.currentInterval = null;
@@ -369,7 +369,7 @@ export class PriceService {
       
       // Format symbol for Binance API
       const binanceSymbol = this.formatSymbolForBinance(symbol);
-      
+
       console.log(`Fetching klines for ${binanceSymbol}, interval: ${adjustedInterval}`);
       
       // Try using Binance API first
@@ -383,12 +383,12 @@ export class PriceService {
           console.error(`Binance API error: ${data.msg}`);
           throw new Error(data.msg);
         }
-        
+
         if (!Array.isArray(data) || data.length === 0) {
           console.warn(`No data from Binance for ${binanceSymbol}, trying fallback...`);
           throw new Error("Empty data from Binance");
         }
-        
+
         console.log(`Received ${data.length} kline points from Binance`);
         
         // Process data from Binance
@@ -408,7 +408,7 @@ export class PriceService {
         if (processedData.length > 300) {
           processedData = this.sampleData(processedData, 300);
         }
-        
+
         return processedData;
       } catch (binanceError) {
         console.error("Error with Binance API, trying CoinGecko fallback:", binanceError);
@@ -429,16 +429,16 @@ export class PriceService {
           
           // Always fetch data for 7 days
           const days = 7;
-          
+
           const geckoUrl = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`;
           const response = await fetch(geckoUrl);
           const data = await response.json();
-          
+
           if (!data.prices || data.prices.length === 0) {
             console.error("No data from CoinGecko fallback");
             return [];
           }
-          
+
           console.log(`Received ${data.prices.length} price points from CoinGecko`);
           
           // Process data from CoinGecko
@@ -458,7 +458,7 @@ export class PriceService {
           if (processedData.length > 300) {
             processedData = this.sampleData(processedData, 300);
           }
-          
+
           return processedData;
         } catch (geckoError) {
           console.error("Both Binance and CoinGecko APIs failed:", geckoError);
@@ -481,18 +481,18 @@ export class PriceService {
     // Find highest and lowest price
     let highestPoint = data[0];
     let lowestPoint = data[0];
-    
+
     data.forEach(point => {
       if (point.close > highestPoint.close) highestPoint = point + point * 0.2; // Add 20% to highest point
       if (point.close < lowestPoint.close) lowestPoint = point - point * 0.2; // Subtract 20% from lowest point
     });
-    
+
     const step = Math.floor(data.length / targetCount);
     const sampledData = [];
     
     // Always keep first point
     sampledData.push(data[0]);
-    
+
     for (let i = step; i < data.length - step; i += step) {
       sampledData.push(data[i]);
     }
@@ -503,13 +503,13 @@ export class PriceService {
     // Add highest and lowest points if not already in sample
     const hasHighest = sampledData.some(p => p.time === highestPoint.time);
     const hasLowest = sampledData.some(p => p.time === lowestPoint.time);
-    
+
     if (!hasHighest) sampledData.push(highestPoint);
     if (!hasLowest) sampledData.push(lowestPoint);
     
     // Sort by time
     sampledData.sort((a, b) => a.time - b.time);
-    
+
     return sampledData;
   }
 } 
