@@ -210,7 +210,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         long: parsed.longAmount,
         short: parsed.shortAmount,
       });
-      
+
     }
   }, [router.query]);
   /**
@@ -963,7 +963,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             contract.oracleDetails(),
             contract.totalDeposited(),
             contract.feePercentage(),
-            contract.dataFeed(), 
+            contract.dataFeed(),
             contract.indexBg()
           ]);
 
@@ -1115,6 +1115,61 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       });
     }
   };
+
+  // Function to withdraw funds
+  const handleWithdraw = async () => {
+    if (!contract || !isOwner || contractBalance <= 0) return;
+  
+    try {
+      // Set a loading state
+      const isWithdrawing = true;
+      
+      // Get the most up-to-date contract balance before withdrawal
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const currentBalanceWei = await provider.getBalance(contractAddress);
+      const currentBalanceEth = parseFloat(ethers.utils.formatEther(currentBalanceWei));
+      
+      const signer = provider.getSigner();
+      const contractWithSigner = contract.connect(signer);
+      
+      // Show pending toast
+      toast({
+        title: "Processing withdrawal",
+        description: `Withdrawing ${currentBalanceEth.toFixed(4)} ETH to your wallet`,
+        status: "info",
+        duration: 2000,
+        isClosable: true,
+      });
+      
+      // Perform the withdrawal
+      const tx = await contractWithSigner.withdraw();
+      await tx.wait();
+      
+      // Success notification with the actual amount withdrawn
+      toast({
+        title: "Withdraw successful",
+        description: `${currentBalanceEth.toFixed(4)} ETH has been withdrawn to your wallet`,
+        status: "success",
+        duration: 4000,
+        isClosable: true,
+      });
+      
+      // Refresh balances
+      await fetchContractBalance();
+      await refreshBalance();
+      
+    } catch (error) {
+      console.error("Error withdrawing funds:", error);
+      toast({
+        title: "Withdraw failed",
+        description: error.message,
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+  };
+  
 
   // Improved fetchPositionHistory
   const fetchPositionHistory = useCallback(async () => {
@@ -1797,11 +1852,14 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                 <HStack justify="center" align="center">
                   <Text color="gray.400">Final Price: </Text>
                   {finalPrice > strikePrice ? (
-                    <Text fontWeight="bold" color="green">{finalPrice} USD</Text>
+                    <>
+                    <Text fontWeight="bold" color="green">{finalPrice} </Text>
+                    <Text fontWeight="bold" color="#FEDF56">USD</Text>
+                    </>
                   ) : (
                     <>
                       <Text fontWeight="bold" color="red">{finalPrice} </Text>
-                      <Text fontWeight="bold" color="#FEDF56">USD</Text>
+                      <Text fontWeight="bold" color="#FEDF56">USD</Text> 
                     </>
                   )}
                 </HStack>
@@ -1819,7 +1877,20 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                 width="100%"
                 mt={4}
               >
-                Claim {reward.toFixed(4)} ETH
+                Claim {reward.toFixed(10)} ETH
+              </Button>
+            )}
+            {isOwner && contractBalance > 0 && currentPhase === Phase.Expiry && (
+              <Button
+                onClick={handleWithdraw}
+                colorScheme="yellow"
+                bg="#FEDF56"
+                color="white"
+                _hover={{ bg: "#FFE56B" }}
+                width="100%"
+                mt={2}
+              >
+                Withdraw {contractBalance.toFixed(10)} ETH
               </Button>
             )}
           </Box>
@@ -1864,12 +1935,12 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
 
                 {/* LONG Section */}
                 <Box
-                position="absolute"
+                  position="absolute"
                   width={`${longPercentage}%`}
                   bgGradient="linear(to-r, #00ea00, #56ff56, #efef8b)"
                   transition="width 0.6s ease"
                   h="100%"
-                
+
                   display="flex"
                   alignItems="center"
                   justifyContent="flex-end"
