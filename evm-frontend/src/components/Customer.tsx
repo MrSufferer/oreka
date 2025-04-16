@@ -15,6 +15,7 @@ import {
 import { ChevronDownIcon, ChevronUpIcon } from '@chakra-ui/icons';
 import { FaWallet, FaChevronLeft, FaArrowUp, FaArrowDown, FaCoins, FaChevronRight, FaRegClock } from 'react-icons/fa';
 import { PiChartLineUpLight } from "react-icons/pi";
+import { CheckIcon } from '@chakra-ui/icons';
 import { GrInProgress } from "react-icons/gr";
 import { ethers } from 'ethers';
 import { motion, useAnimation } from 'framer-motion';
@@ -34,6 +35,7 @@ import {
   formatStrikePriceForContract
 } from '../utils/priceFeeds';
 
+import { determineMarketResult } from '../utils/market';
 /**
  * Enums for market sides and phases
  */
@@ -75,12 +77,11 @@ interface CustomerProps {
  * @param contract - The ethers.js contract instance
  * @returns Object containing phase and oracle details
  */
-
 export const fetchMarketDetails = async (contract: ethers.Contract) => {
   try {
     const phase = await contract.currentPhase();
     const oracleDetails = await contract.oracleDetails();
-    
+
     return { phase, oracleDetails };
   } catch (error) {
     console.error("Error fetching market details:", error);
@@ -102,6 +103,12 @@ const getProviderAndSigner = async () => {
   console.log("Connected to network:", network.name, network.chainId);
 
   return { provider, signer };
+};
+
+// Define the function at the top of your file
+const createInitialPositionHistory = (biddingStartTime: number) => {
+  // Logic to create initial position history
+  return []; // Replace with actual logic
 };
 
 /**
@@ -126,6 +133,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [positions, setPositions] = useState<{ long: number; short: number }>({ long: 0, short: 0 });
   const [contractAddress, setContractAddress] = useState(initialContractAddress || '');
+  const [indexBg, setIndexBg] = useState(0);
 
   // Price and chart data
   const [currentPrice, setCurrentPrice] = useState<number>(0);
@@ -175,8 +183,36 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   const [contractOwner, setContractOwner] = useState<string | null>(null);
   const [showRules, setShowRules] = useState(false);
 
+  // Toast
   const toast = useToast();
+  // Query params
+  const { data } = router.query;
 
+  // Memoized parsed contract data
+  const parsedContractData = useMemo(() => {
+    if (!data) return null;
+    try {
+      return JSON.parse(data as string);
+    } catch (err) {
+      return null;
+    }
+  }, [data]);
+
+  // Effect to update state with query params
+  useEffect(() => {
+    if (data) {
+      const parsed = JSON.parse(data as string);
+      setStrikePrice(parsed.strikePrice);
+      setTradingPair(parsed.tradingPair);
+      setCurrentPhase(parsed.phase);
+      setMaturityTime(parsed.maturityTime);
+      setPositions({
+        long: parsed.longAmount,
+        short: parsed.shortAmount,
+      });
+      
+    }
+  }, [router.query]);
   /**
  * Effect to initialize contract address from props or localStorage
  */
@@ -340,7 +376,8 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       // Update strikePrice - convert from integer (stored in blockchain) to float
       //const oracleDetails = await contract.oracleDetails();
       const strikePriceRaw = oracleDetails.strikePrice;
-      setStrikePrice(formatStrikePriceFromContract(strikePriceRaw, 10 ** 8));
+      const strikePriceFormatted = (parseInt(strikePriceRaw.toString()) / 10 ** 8).toFixed(4);
+      setStrikePrice(strikePriceFormatted);
 
       setMaturityTime(maturityTime.toNumber());
       setOracleDetails(oracleDetails);
@@ -349,6 +386,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       setBiddingStartTime(Number(biddingStartTime));
       setResolveTime(Number(resolveTime));
       setFeePercentage(feePercentage.toString());
+      setIndexBg(indexBg);
       // Check if can resolve and expire
       const now = Math.floor(Date.now() / 1000);
       setCanResolve(phase === Phase.Bidding && now >= maturityTime.toNumber());
@@ -360,7 +398,8 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
 
       // Get finalPrice from oracleDetails when at phase Maturity or Expiry
       if (phase === Phase.Maturity || phase === Phase.Expiry) {
-        setFinalPrice(oracleDetails.finalPrice.toString());
+        const finalPriceFormatted = (parseInt(oracleDetails.finalPrice.toString()) / 10 ** 8).toFixed(4);
+        setFinalPrice(finalPriceFormatted);
       }
 
     } catch (error) {
@@ -393,10 +432,12 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       const finalPrice = parseFloat(oracleDetails.finalPrice);
       const strikePrice = parseFloat(oracleDetails.strikePrice);
 
+      setMarketResult(determineMarketResult(finalPrice, strikePrice));
+
       if (finalPrice < strikePrice) {
-        setMarketResult('SHORT IS WIN');
+        setMarketResult('SHORT');
       } else {
-        setMarketResult('LONG IS WIN');
+        setMarketResult('LONG');
       }
     } catch (error) {
       console.error("Error checking market result:", error);
@@ -474,6 +515,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   useEffect(() => {
     if (!contract || currentPhase !== Phase.Bidding) return;
 
+    // Initialize position data
     const initializePositionData = async () => {
       const biddingStartTime = await contract.biddingStartTime();
       const maturityTime = await contract.maturityTime();
@@ -484,6 +526,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       setPositionData(timePoints);
     };
 
+    // Effect to update position data
     const updatePositionData = async () => {
       try {
         const now = Math.floor(Date.now() / 1000);
@@ -536,6 +579,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       return;
     }
 
+    // Convert bid amount to ETH
     const bidAmountInEth = parseFloat(amount);
     let potentialReturn = 0;
     let profitPercentage = 0;
@@ -587,6 +631,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       }
     }
 
+    // Update potential profit and profit percentage
     setPotentialProfit(potentialReturn.toFixed(8));
     setProfitPercentage(profitPercentage);
   }, [positions, feePercentage]);
@@ -638,8 +683,8 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       const network = await provider.getNetwork();
 
       // Fix options type to allow gasLimit property
-      const options: { value: ethers.BigNumber; gasLimit?: any } = { 
-        value: ethers.utils.parseEther(bidAmount) 
+      const options: { value: ethers.BigNumber; gasLimit?: any } = {
+        value: ethers.utils.parseEther(bidAmount)
       };
 
       if (network.chainId === 1) {
@@ -681,6 +726,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   };
 
+  // Function to check if user can claim reward
   const canClaimReward = useCallback(async () => {
     if (!contract || currentPhase !== Phase.Expiry) return;
 
@@ -723,7 +769,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         const totalDeposited = positions.long.add(positions.short);
 
         const reward = userDeposit.mul(totalDeposited).div(totalWinningDeposits);
-        const fee = reward.mul(10).div(100); // 10% fee
+        const fee = (reward * Number(feePercentage)) / 100;
         const finalReward = reward.sub(fee);
 
         setReward(parseFloat(ethers.utils.formatEther(finalReward)));
@@ -744,7 +790,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   }, [currentPhase, canClaimReward]);
 
-
+  // Function to start bidding
   const startBidding = async () => {
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
@@ -778,6 +824,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   };
 
+  // Effect to update the price chart
   useEffect(() => {
     const priceService = PriceService.getInstance();
 
@@ -794,7 +841,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     };
   }, []);
 
-  // Update the price chart useEffect to use the correct symbol
+  // Effect to update the price chart
   useEffect(() => {
     const fetchPriceHistory = async () => {
       try {
@@ -817,7 +864,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     return () => clearInterval(interval);
   }, [chartSymbol]);
 
-  // Add handleExpireMarket function
+  // Function to expire market
   const handleExpireMarket = async () => {
     if (!contract) return;
     try {
@@ -881,6 +928,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   };
 
+  // Effect to load contract data
   useEffect(() => {
     const loadContractData = async () => {
       try {
@@ -905,7 +953,8 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             //oracleDetails,
             totalDeposited,
             feePercentage,
-            dataFeedAddress  // Get the Chainlink price feed address
+            dataFeedAddress,
+            indexBg
           ] = await Promise.all([
             contract.positions(),
             contract.currentPhase(),
@@ -914,7 +963,8 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             contract.oracleDetails(),
             contract.totalDeposited(),
             contract.feePercentage(),
-            contract.dataFeed()  // Add this line to get the price feed address
+            contract.dataFeed(), 
+            contract.indexBg()
           ]);
 
           // Update states
@@ -923,14 +973,14 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           // Get strikePrice
           const oracleDetails = await contract.oracleDetails();
           const strikePriceRaw = oracleDetails.strikePrice;
-          const strikePriceFormatted = (parseInt(strikePriceRaw.toString()) / 10**8).toFixed(2);
+          const strikePriceFormatted = (parseInt(strikePriceRaw.toString()) / 10 ** 8).toFixed(2);
           setStrikePrice(strikePriceFormatted);
           setCurrentPhase(phase);
           setMaturityTime(maturityTime.toNumber());
           setOracleDetails(oracleDetails);
           setTotalDeposited(parseFloat(ethers.utils.formatEther(totalDeposited)));
           setFeePercentage(feePercentage.toString());
-
+          setIndexBg(indexBg);
           // Map the price feed address to trading pair
           const tradingPair = getTradingPairFromPriceFeed(dataFeedAddress);
 
@@ -961,35 +1011,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
 
   }, []);
 
-  // Add near other state declarations
-  const phaseCircleProps = (phase: Phase) => {
-    // Get the color based on the phase
-    const getPhaseColor = (phase: Phase) => {
-      switch (phase) {
-        case Phase.Trading:
-          return "green.400";
-        case Phase.Bidding:
-          return "blue.400";
-        case Phase.Maturity:
-          return "orange.400";
-        case Phase.Expiry:
-          return "red.400";
-        default:
-          return "gray.400";
-      }
-    };
-
-    // Use the phase-specific color if it's the current phase,
-    // otherwise use a dimmer version
-    return {
-      bg: currentPhase === phase ? getPhaseColor(phase) : "gray.700",
-      color: currentPhase === phase ? "black" : "gray.500",
-      fontWeight: "bold",
-      zIndex: 1
-    };
-  };
-
-  // resolve market
+  // Function to resolve market
   const resolve = async () => {
     if (!contract) return;
 
@@ -1054,7 +1076,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   };
 
-  // claim reward
+  // Function to claim reward for customer
   const claimReward = async () => {
     if (!contract || currentPhase !== Phase.Expiry) return;
 
@@ -1173,9 +1195,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         }
       });
     }
-  }, [contract, currentPhase, biddingStartTime, fetchPositionHistory]);
+  }, [contract, currentPhase, biddingStartTime, fetchPositionHistory, positions]);
 
-  // Add event listener for PositionUpdated events realtime
+  // Effect to add event listener for PositionUpdated events realtime
   useEffect(() => {
     if (!contract || currentPhase < Phase.Bidding) return;
 
@@ -1231,7 +1253,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   }, [contract, currentPhase]);
 
 
-  // check permission
+  // Function to check permissions 
   const checkPermissions = async () => {
     if (!contract || !walletAddress) return;
 
@@ -1304,12 +1326,13 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     return () => clearInterval(interval);
   }, [currentPhase, maturityTime, resolveTime]);
 
-  // Calculate long and short percentages
+  // Calculate long percentages
   const longPercentage = useMemo(() => {
     const total = positions.long + positions.short;
     return total > 0 ? (positions.long / total) * 100 : 50;
   }, [positions]);
 
+  // Calculate short percentage
   const shortPercentage = useMemo(() => {
     const total = positions.long + positions.short;
     return total > 0 ? (positions.short / total) * 100 : 50;
@@ -1483,14 +1506,14 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         }));
 
       } catch (error) {
-        console.error("Error fetching contract data:", error);
-        toast({
-          title: "Error loading contract data",
-          description: error.message || "An unexpected error occurred",
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        });
+        // console.error("Error fetching contract data:", error);
+        // toast({
+        //   title: "Error loading contract data",
+        //   description: error.message || "An unexpected error occurred",
+        //   status: "error",
+        //   duration: 5000,
+        //   isClosable: true,
+        // });
       } finally {
         setIsLoadingContractData(false);
       }
@@ -1533,6 +1556,11 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       checkOwner();
     }
   }, [contract, walletAddress]);
+
+  // get bg color for strike price
+  const bgColors = ["#A56DFF", "#26D1E6", "#FEDF56", "#7EFEB2", "#FF6492"]; // same as used in ListAddressOwner
+  const strikeColor = bgColors[indexBg % bgColors.length];
+
 
   return (
     <Box bg="black" minH="100vh">
@@ -1583,8 +1611,9 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                       {tradingPair}
                     </Text>
                     <Text color="white" fontSize="25px">
-                      will reach ${strikePrice} by {formatMaturityTime(maturityTime)}
+                      will reach <Text as="span" color={strikeColor}>${strikePrice}</Text> by {formatMaturityTime(maturityTime)}
                     </Text>
+
                   </>
                 )}
               </HStack>
@@ -1616,19 +1645,6 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
               )}
             </HStack>
           </Box>
-          {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
-            <Box
-              border="1px solid #FEDF56"
-              borderRadius="md"
-              p={3}
-              mb={4}
-              textAlign="center"
-              ml="100px"
-              textColor="white"
-            >
-              <Text fontWeight="bold">Result: {marketResult}</Text>
-            </Box>
-          )}
         </HStack>
       </Box>
 
@@ -1659,6 +1675,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                     maturityTime={maturityTime}
                     enhancedPositionData={enhancedPositionData}
                     setEnhancedPositionData={setEnhancedPositionData}
+
                   />
                 </Box>
               </TabPanel>
@@ -1675,6 +1692,8 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                   chartSymbol={chartSymbol}
                   biddingStartTime={biddingStartTime}
                   maturityTime={maturityTime}
+                  enhancedPositionData={enhancedPositionData}
+                  setEnhancedPositionData={setEnhancedPositionData}
                 />
               </TabPanel>
             </TabPanels>
@@ -1775,8 +1794,17 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             {/* Show Final Price in Maturity and Expiry phases */}
             {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
               <Flex justify="space-between" align="center" mt={2} textAlign="center" fontSize="20px" color="#FEDF56">
-                <Text color="gray.400">Final Price: </Text>
-                <Text fontWeight="bold" color="white">{finalPrice} USD</Text>
+                <HStack justify="center" align="center">
+                  <Text color="gray.400">Final Price: </Text>
+                  {finalPrice > strikePrice ? (
+                    <Text fontWeight="bold" color="green">{finalPrice} USD</Text>
+                  ) : (
+                    <>
+                      <Text fontWeight="bold" color="red">{finalPrice} </Text>
+                      <Text fontWeight="bold" color="#FEDF56">USD</Text>
+                    </>
+                  )}
+                </HStack>
               </Flex>
             )}
 
@@ -1805,69 +1833,88 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             borderColor="gray.700"
           >
             {/* LONG/SHORT Ratio */}
-            <Flex
-              align="center"
-              w="100%"
-              h="25px"
-              borderRadius="full"
-              bg="gray.800"
-              border="1px solid"
-              borderColor="gray.600"
-              position="relative"
-              overflow="hidden"
-              boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
-              mb={4}
-            >
-              {/* LONG Section */}
-              <Box
-                width={`${longPercentage}%`}
-                bgGradient="linear(to-r, #0f0c29, #00ff87)"
-                transition="width 0.6s ease"
-                h="full"
-                display="flex"
-                alignItems="center"
-                justifyContent="flex-end"
-                pr={3}
+            <HStack align="center" spacing={3} w="100%">
+              {longPercentage > 8 && (
+                <Text
+                  fontSize="sm"
+                  fontWeight="bold"
+                  color="whiteAlpha.800"
+                  whiteSpace="nowrap"
+                  mb={4}
+                >
+                  {longPercentage.toFixed(0)}%
+                </Text>
+              )}
+              <Flex
+                flex="1"
+                align="center"
+                w="100%"
+                h="18px"
+                borderRadius="full"
+                bg="gray.800"
+                border="5px solid"
+                borderColor="gray.400"
                 position="relative"
-                zIndex={1}
+                overflow="hidden"
+                boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                mb={4}
+                p={0}
               >
-                {longPercentage > 8 && (
-                  <Text
-                    fontSize="sm"
-                    fontWeight="bold"
-                    color="whiteAlpha.800"
-                  >
-                    {longPercentage.toFixed(0)}%
-                  </Text>
-                )}
-              </Box>
 
-              {/* SHORT Section (in absolute layer for smooth overlap) */}
-              <Box
+
+                {/* LONG Section */}
+                <Box
                 position="absolute"
-                right="0"
-                top="0"
-                h="100%"
-                width={`${shortPercentage}%`}
-                bgGradient="linear(to-r, #ff512f, #dd2476)"
-                transition="width 0.6s ease"
-                display="flex"
-                alignItems="center"
-                justifyContent="flex-start"
-                pl={3}
-                zIndex={0}
-              >
-                {shortPercentage > 8 && (
-                  <Text
-                    fontSize="sm"
-                    fontWeight="bold"
-                    color="whiteAlpha.800"
-                  >
-                    {shortPercentage.toFixed(0)}%
-                  </Text>
-                )}
-              </Box>
-            </Flex>
+                  width={`${longPercentage}%`}
+                  bgGradient="linear(to-r, #00ea00, #56ff56, #efef8b)"
+                  transition="width 0.6s ease"
+                  h="100%"
+                
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-end"
+                  pr={3}
+                  left="0"
+                  top="0"
+                  zIndex={1}
+
+                >
+
+                </Box>
+
+                {/* SHORT Section (in absolute layer for smooth overlap) */}
+                <Box
+                  position="absolute"
+                  right="0"
+                  top="0"
+                  h="100%"
+                  width={`${shortPercentage}%`}
+                  bgGradient="linear(to-r, #FF6B81, #D5006D)"
+                  transition="width 0.6s ease"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-start"
+                  pl={3}
+                  zIndex={0}
+
+                >
+
+                </Box>
+
+              </Flex>
+
+              {shortPercentage > 8 && (
+                <Text
+                  fontSize="sm"
+                  fontWeight="bold"
+                  color="whiteAlpha.800"
+                  whiteSpace="nowrap"
+                  mb={4}
+                >
+                  {shortPercentage.toFixed(0)}%
+                </Text>
+              )}
+            </HStack>
 
             <HStack spacing={4} mb={3} ml={2} mr={2}>
               <Button
@@ -2009,11 +2056,32 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
             borderRadius="30px"
             boxShadow="md"
             position="relative"
-            height="282px"
+            height="320px"
           >
-            <Text fontSize="lg" fontWeight="bold" mb={4} color="#gray.600" textAlign="center">
-              Market is Live
-            </Text>
+            {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) ? (
+              <VStack spacing={1} mb={1}>
+                <HStack>
+                  <Text fontSize="lg" fontWeight="bold" color="#gray.600" textAlign="center">
+                    Outcome:
+                  </Text>
+                  <Text
+                    fontSize="lg"
+                    fontWeight="bold"
+                    color={marketResult === 'LONG' ? 'green' : 'red'}
+                    textAlign="center"
+                  >
+                    {marketResult || 'Pending'}
+                  </Text>
+                </HStack>
+                <Text fontSize="xs" color="gray.400" textAlign="center">
+                  {formatTimeToLocal(maturityTime)}
+                </Text>
+              </VStack>
+            ) : (
+              <Text fontSize="2xl" fontWeight="bold" mb={4} mt={2} color="#gray.600" textAlign="center">
+                Market is Live
+              </Text>
+            )}
 
             <Box
               bg="#0B0E16"
@@ -2022,7 +2090,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
               borderColor="gray.700"
               borderRadius="30px"
               position="absolute"
-              top="55px"
+              top="70px"
               left="0"
               right="0"
               zIndex={1}
@@ -2042,7 +2110,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
 
                 {/* Trading Phase */}
                 <HStack spacing={4}>
-                  <Circle size="35px" bg="green.400" color="green.400" {...phaseCircleProps(Phase.Trading)}>1</Circle>
+                  <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">{currentPhase >= Phase.Bidding ? <CheckIcon boxSize={4} /> : '1'}</Circle>
                   <VStack align="start" spacing={0} fontWeight="bold">
                     <Text fontSize="lg" color={currentPhase === Phase.Trading ? "green.400" : "gray.500"} >
                       Trading
@@ -2062,16 +2130,16 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                       _hover={{ bg: "#FFE56B" }}
                       alignItems="center"
                       justifyContent="center"
-                      width="35%"
+                      width="30%"
                     >
-                      Start Bidding
+                      Bidding
                     </Button>
                   )}
                 </HStack>
 
                 {/* Bidding Phase */}
                 <HStack spacing={4}>
-                  <Circle size="35px" {...phaseCircleProps(Phase.Bidding)}>2</Circle>
+                  <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">{currentPhase >= Phase.Maturity ? <CheckIcon boxSize={4} /> : '2'}</Circle>
                   <VStack align="start" spacing={0} fontWeight="bold">
                     <Text fontSize="lg" color={currentPhase === Phase.Bidding ? "blue.400" : "gray.500"}>
                       Bidding
@@ -2080,21 +2148,6 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                       {biddingStartTime ? new Date(biddingStartTime * 1000).toLocaleString() : 'Waiting for Start'}
                     </Text>
                   </VStack>
-                </HStack>
-
-                {/* Maturity Phase with Resolve Button */}
-                <HStack spacing={4} justify="space-between">
-                  <HStack spacing={4}>
-                    <Circle size="35px" {...phaseCircleProps(Phase.Maturity)}>3</Circle>
-                    <VStack align="start" spacing={0} fontWeight="bold">
-                      <Text fontSize="lg" color={currentPhase === Phase.Maturity ? "orange.400" : "gray.500"}>
-                        Maturity
-                      </Text>
-                      <Text fontSize="xs" color="gray.500">
-                        {maturityTime ? formatTimeToLocal(maturityTime) : 'Pending'}
-                      </Text>
-                    </VStack>
-                  </HStack>
                   <Spacer />
                   {/* Resolve Button - Show when canResolve = true */}
                   {canResolve && !isResolving && (
@@ -2112,27 +2165,28 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                       loadingText="Resolving"
                       alignItems="center"
                       justifyContent="center"
-                      width="35%"
+                      width="30%"
                     >
                       Resolve
                     </Button>
                   )}
                 </HStack>
 
-                {/* Expiry Phase */}
+                {/* Maturity Phase with Resolve Button */}
                 <HStack spacing={4} justify="space-between">
                   <HStack spacing={4}>
-                    <Circle size="35px" {...phaseCircleProps(Phase.Expiry)}>4</Circle>
+                    <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">{currentPhase >= Phase.Maturity ? <CheckIcon boxSize={4} /> : '3'}</Circle>
                     <VStack align="start" spacing={0} fontWeight="bold">
-                      <Text fontSize="lg" color={currentPhase === Phase.Expiry ? "red.400" : "gray.500"}>
-                        Expiry
+                      <Text fontSize="lg" color={currentPhase === Phase.Maturity ? "orange.400" : "gray.500"}>
+                        Maturity
                       </Text>
                       <Text fontSize="xs" color="gray.500">
-                        {maturityTime ? formatTimeToLocal(maturityTime + 30) : 'Pending'}
+                        {maturityTime ? formatTimeToLocal(maturityTime) : 'Pending'}
                       </Text>
                     </VStack>
                   </HStack>
                   <Spacer />
+
                   {/* Expire Button - Show when ở phase Maturity and resolved */}
                   {currentPhase === Phase.Maturity && finalPrice && isOwner && (
                     <Button
@@ -2146,11 +2200,27 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                       loadingText="Expiring"
                       alignItems="center"
                       justifyContent="center"
-                      width="35%"
+                      width="30%"
                     >
                       Expire
                     </Button>
                   )}
+                </HStack>
+
+                {/* Expiry Phase */}
+                <HStack spacing={4} justify="space-between">
+                  <HStack spacing={4}>
+                    <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">4</Circle>
+                    <VStack align="start" spacing={0} fontWeight="bold">
+                      <Text fontSize="lg" color={currentPhase === Phase.Expiry ? "red.400" : "gray.500"}>
+                        Expiry
+                      </Text>
+                      <Text fontSize="xs" color="gray.500">
+                        {maturityTime ? formatTimeToLocal(maturityTime + 30) : 'Pending'}
+                      </Text>
+                    </VStack>
+                  </HStack>
+                  <Spacer />
                 </HStack>
               </VStack>
             </Box>
