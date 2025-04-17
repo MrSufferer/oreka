@@ -1,30 +1,40 @@
+/*
+ListAddressOwner.tsx
+@author: Hieu Nguyen
+@description: This component displays a list of binary option markets owned by a specific address
+@param: ownerAddress - Ethereum address to display contracts for
+@param: page - Current pagination page number
+*/
 import React, { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
-import { Box, Button, HStack, Icon, Text, VStack, SimpleGrid, Flex, Input, Select, Divider, Progress, InputGroup, InputRightAddon, Spinner, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Tooltip, Spacer, Image } from '@chakra-ui/react';
-
-import { FaCalendarDay, FaPlayCircle, FaClock, FaCheckCircle, FaListAlt, FaRegClock } from 'react-icons/fa'; // Import các biểu tượng
-import { IoWalletOutline } from "react-icons/io5";
+import { Box, Button, HStack, Icon, Text, VStack, SimpleGrid, Flex, Input, Select, Divider, Progress, InputGroup, InputRightAddon, Spinner, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Tooltip, Spacer, Image, InputRightElement } from '@chakra-ui/react';
+import { FaCalendarDay, FaPlayCircle, FaClock, FaCheckCircle, FaListAlt, FaRegClock, FaDollarSign, FaSearch, FaChevronLeft } from 'react-icons/fa';
+import { IoLogoUsd, IoWalletOutline } from "react-icons/io5";
 import { FaEthereum, FaWallet, FaTrophy, FaArrowUp, FaArrowDown } from 'react-icons/fa';
+import { LiaCoinsSolid } from "react-icons/lia";
+import { LuCircleDollarSign } from "react-icons/lu";
 import { GoInfinity } from "react-icons/go";
-import { SiBitcoinsv } from "react-icons/si";
+import { SiBitcoinsv, SiChainlink, SiDogecoin } from "react-icons/si";
 import { FaCoins } from "react-icons/fa";
 import Factory from '../contracts/abis/FactoryABI.json';
 import { useToast } from '@chakra-ui/react';
 import { useRouter } from 'next/router';
 import { FACTORY_ADDRESS } from '../config/contracts';
-import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketABI.json';
+import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketChainlinkABI.json';
 import { useAuth } from '../context/AuthContext';
 import { PriceService } from '../services/PriceService';
 import { format, formatDistanceToNow } from 'date-fns';
 import { getCurrentTimestamp, isTimestampPassed, getTimeRemaining } from '../utils/timeUtils';
-import { STRIKE_PRICE_MULTIPLIER } from '../utils/constants';
+import { GrDeploy } from 'react-icons/gr';
+import { determineMarketResult } from '../utils/market';
 
+// ListAddressOwnerProps interface
 interface ListAddressOwnerProps {
   ownerAddress: string;
   page: number;
 }
 
-
+// ContractData interface
 interface ContractData {
   address: string;
   createDate: string;
@@ -38,6 +48,7 @@ interface ContractData {
   indexBg: string;
 }
 
+// Phase enum
 enum Phase { Trading, Bidding, Maturity, Expiry }
 
 
@@ -74,39 +85,66 @@ const getPhaseName = (phase: number) => {
 };
 
 
-
-// update getMarketTitle to format strikePrice correctly
-const getMarketTitle = (contract) => {
+// Function to get market title text
+const getMarketTitleText = (contract: any): string => {
   try {
-    // Format trading pair
     const pair = contract.tradingPair.replace('/', '-');
-
-    // Format maturity time
     const timestamp = Number(contract.maturityTime);
     if (isNaN(timestamp) || timestamp === 0) return `${pair} Market`;
 
     const date = new Date(timestamp * 1000);
     const maturityTimeFormatted = format(date, 'MMM d, yyyy h:mm a');
 
-    // convert strikePrice from integer to float
-    const strikePriceInteger = parseInt(contract.strikePrice);
-    const strikePriceFormatted = (strikePriceInteger / STRIKE_PRICE_MULTIPLIER).toFixed(2);
+    let strikePriceInteger;
+    try {
+      strikePriceInteger = ethers.BigNumber.from(contract.strikePrice);
+    } catch (e) {
+      strikePriceInteger = parseInt(contract.strikePrice);
+    }
 
-    return `${pair} will reach $${strikePriceFormatted} by ${maturityTimeFormatted} ?`;
+    let strikePriceFormatted;
+    if (pair.includes('BTC') || pair.includes('ETH')) {
+      strikePriceFormatted = (strikePriceInteger / 10 ** 8).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    } else {
+      strikePriceFormatted = (strikePriceInteger / 10 ** 8).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 4
+      });
+    }
+
+    return `${pair} will reach $${strikePriceFormatted} by ${maturityTimeFormatted}?`;
   } catch (error) {
-    console.error("Error getting market title:", error);
-    return "Unknown Market";
+    return 'Unknown Market';
   }
 };
 
-/**
- * Cleans up market titles by removing timestamp references in parentheses
- * @param {string} title - The original market title
- * @return {string} Cleaned title without timestamp information
- */
-const cleanupMarketTitle = (title: string) => {
-  // Remove any string within parentheses containing "Sat"
-  return title.replace(/\([^)]*Sat[^)]*\)/g, '').trim();
+// Function to get market title JSX
+const getMarketTitleJSX = (contract: any): JSX.Element => {
+  const text = getMarketTitleText(contract);
+
+  const bgColors = [
+    "#6EE7B7", "#FCD34D", "#FCA5A5", "#A5B4FC", "#F9A8D4",
+    "#FDBA74", "#67E8F9", "#C4B5FD", "#F87171", "#34D399"
+  ];
+  const indexBg = contract.indexBg ?? 0;
+  const bgColor = bgColors[indexBg % bgColors.length];
+
+  const pair = contract.tradingPair.replace('/', '-');
+  const pairColor = "#FEDF56";
+
+  return (
+    <Text>
+      <Text as="span" color={pairColor} fontWeight="semibold">{pair}</Text>{' '}
+      will reach{' '}
+      <Text as="span" color={bgColor} fontWeight="bold">
+        ${text.split('$')[1]?.split(' ')[0]}
+      </Text>{' '}
+      by {text.split('by ')[1]}
+    </Text>
+  );
 };
 
 /**
@@ -135,22 +173,75 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   const contractsPerPage = 32;
   const [currentContracts, setCurrentContracts] = useState<ContractData[]>([]);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ContractData[]>([]);
+
+
   // Factory contract address for interacting with the main factory
   const FactoryAddress = FACTORY_ADDRESS;
 
   // Tab selection for filtering markets
   const [currentTab, setCurrentTab] = useState<string>('All Markets');
 
+  // One week ago timestamp
+  const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
   /**
    * Filters contracts based on the currently selected tab
    * Different tabs show different subsets of markets (All, Recent, Active, Expired, By Asset)
    */
-  const filteredContracts = currentContracts.filter(contract => {
-    if (currentTab === 'All Markets') return true;
-    if (currentTab === 'Most recent') return true; // Will be sorted later, no filtering needed
-    if (currentTab === 'Quests') return contract.phase === Phase.Trading || contract.phase === Phase.Bidding;
-    if (currentTab === 'Results') return contract.phase === Phase.Maturity || contract.phase === Phase.Expiry;
-    return contract.tradingPair === currentTab; // Filter by trading pair if tab matches a pair name
+  const filteredContracts = currentContracts
+  .filter(contract => {
+    const contractTimestamp = contract.createDate
+      ? new Date(contract.createDate).getTime()
+      : Number(contract.maturityTime) * 1000;
+
+    const now = Date.now();
+
+    switch (currentTab) {
+      case 'All Markets':
+        return true;
+
+      case 'Most recent':
+        return (
+          contractTimestamp >= oneWeekAgo 
+          //  && Number(contract.phase) !== Phase.Maturity &&
+          // Number(contract.phase) !== Phase.Expiry
+        );
+
+      case 'Quests':
+        return Number(contract.phase) === Phase.Trading || Number(contract.phase) === Phase.Bidding;
+
+      case 'Results':
+        return Number(contract.phase) === Phase.Maturity || Number(contract.phase) === Phase.Expiry;
+
+      default:
+        return contract.tradingPair === currentTab;
+    }
+  })
+  .sort((a, b) => {
+    if (currentTab === 'All Markets') {
+      const now = Date.now();
+      const aMaturity = Number(a.maturityTime) * 1000;
+      const bMaturity = Number(b.maturityTime) * 1000;
+
+      const aHasExpired = now > aMaturity;
+      const bHasExpired = now > bMaturity;
+
+      // If both are not expired, sort by maturity time
+      if (!aHasExpired && !bHasExpired) {
+        return aMaturity - bMaturity;
+      }
+
+      // If only a has expired, prioritize b
+      if (aHasExpired && !bHasExpired) return 1;
+      if (!aHasExpired && bHasExpired) return -1;
+
+      // If both have expired, keep the order
+      return 0;
+    }
+
+    return 0;
   });
 
   /**
@@ -167,26 +258,6 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
       setCurrentContracts(sortedContracts);
     }
   }, [currentTab]);
-
-
-
-
-
-  /**
-   * Calculates total page count based on number of contracts and pagination settings
-   * Provides a navigation handler for changing pages
-   */
-  // const totalPages = Math.ceil(deployedContracts.length / contractsPerPage);
-
-  /**
-   * Handles pagination navigation
-   * @param {number} page - Target page number to navigate to
-   */
-  // const handlePageChange = (page: number) => {
-  //   if (page !== currentPage) { // Only change if page is different from current
-  //     router.push(`/listaddress/page${page}`);
-  //   }
-  // };
 
   /**
  * Updates displayed contracts when page changes or when contract data updates
@@ -214,17 +285,26 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   const fetchDeployedContracts = async () => {
     try {
       setLoading(true);
+
       const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const factoryContract = new ethers.Contract(FactoryAddress, Factory.abi, provider);
+      const network = await provider.getNetwork();
+      console.log("Current network:", network.name, network.chainId);
+
+      // Use network-specific factory address if necessary
+      let factoryAddress = FACTORY_ADDRESS;
+      console.log("Using factory address:", factoryAddress);
+
+      const factoryContract = new ethers.Contract(factoryAddress, Factory.abi, provider);
 
       console.log("Fetching all contracts from all known owners");
 
       // List of known wallet addresses to check for contracts
       // Can be expanded with additional addresses as the platform grows
       const knownOwners = [
-        "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", // Default Hardhat account #0
-        "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", // Default Hardhat account #1
-        "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", // Default Hardhat account #2
+        // "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", // Default Hardhat account #0
+        // "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", // Default Hardhat account #1
+        // "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", // Default Hardhat account #2
+
         // Additional known addresses can be added here
       ];
 
@@ -292,28 +372,30 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
           // Get basic data from contract
           const [
             positions,
-            strikePriceBN,
+            oracleDetails,
             phase,
             maturityTimeBN,
             tradingPair,
             owner
           ] = await Promise.all([
             contract.positions(),
-            contract.strikePrice(),
+            contract.oracleDetails(),
             contract.currentPhase(),
             contract.maturityTime(),
             contract.tradingPair().catch(() => 'Unknown'),
             contract.owner()
           ]);
 
-          // Handle background index separately to support backward compatibility with older contracts
-          let indexBgValue = 1; // Default value
+          const strikePriceBN = oracleDetails.strikePrice;
+
+          // Handle background index separately
+          let indexBgValue = 1; // Default random value
           try {
             const indexBgResult = await contract.indexBg();
             indexBgValue = indexBgResult.toNumber ? indexBgResult.toNumber() : parseInt(indexBgResult.toString());
             console.log(`Contract ${address} has indexBg: ${indexBgValue}`);
           } catch (error) {
-            console.log(`Error getting indexBg for contract ${address}, using default: 1`);
+            console.log(`Error getting indexBg for contract ${address}, using random: ${indexBgValue}`);
           }
 
           // Convert maturityTime from BigNumber to number
@@ -393,6 +475,20 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   }, [ownerAddress]);
 
   /**
+   * Get icon by symbol
+   * @param {string} tradingPair - The trading pair symbol
+   * @returns {React.ReactNode} The icon component
+   */
+  const getIconBySymbol = (tradingPair: string) => {
+    if (tradingPair.includes("BTC")) return SiBitcoinsv;
+    if (tradingPair.includes("ETH")) return FaEthereum;
+    if (tradingPair.includes("LINK")) return SiChainlink;
+    if (tradingPair.includes("DAI")) return SiDogecoin;
+    if (tradingPair.includes("USDC")) return IoLogoUsd;
+    return FaDollarSign; // fallback mặc định
+  };
+
+  /**
    * Set up event listeners for new contract deployments
    * Refreshes contract list automatically when new contracts are deployed
    */
@@ -439,31 +535,17 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     localStorage.setItem('selectedContractAddress', contractAddress);
 
     // Store additional contract data for Customer.tsx to use immediately
-    localStorage.setItem('contractData', JSON.stringify({
-      address: contractAddress,
-      strikePrice: contractData.strikePrice,
-      maturityTime: contractData.maturityTime,
-      tradingPair: contractData.tradingPair,
-      phase: contractData.phase,
-      longAmount: contractData.longAmount,
-      shortAmount: contractData.shortAmount,
-      owner: contractData.owner,
-      timestamp: Date.now()
-    }));
+    localStorage.removeItem('contractData');
+
 
     // Always navigate to the customer view for the contract
-    router.push(`/customer/${contractAddress}`);
+    router.push({
+      pathname: `/customer/${contractData.address}`,
+      query: {
+        data: JSON.stringify(contractData), // serialize object
+      },
+    });
 
-    // Show warning toast if user is not the contract owner
-    if (isConnected && walletAddress.toLowerCase() !== owner.toLowerCase()) {
-      toast({
-        title: "Access restricted",
-        description: "You are not the owner of this contract. Redirecting to market view.",
-        status: "warning",
-        duration: 5000,
-        isClosable: true,
-      });
-    }
   };
 
   /**
@@ -552,12 +634,21 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     currentContracts.forEach(contract => {
       if (!contract) return;
 
-      // Read indexBg from contract and convert to number
-      const bgIndex = contract.indexBg ?
-        Math.min(Math.max(parseInt(contract.indexBg), 1), 10) :
-        1;
+      // Get indexBg from contract data
+      let bgIndex: number;
 
-      console.log(`Contract ${contract.address} using background index: ${bgIndex}`);
+      if (contract.indexBg && contract.indexBg !== '0') {
+        // Use indexBg from contract
+        bgIndex = parseInt(contract.indexBg);
+        console.log(`Contract ${contract.address} has indexBg from contract: ${bgIndex}`);
+      } else {
+        // Generate a random indexBg if not available
+        bgIndex = 1; // Random value between 1-10
+        console.log(`Contract ${contract.address} using generated indexBg: ${bgIndex}`);
+      }
+
+      // Ensure value is between 1-10
+      bgIndex = Math.min(Math.max(bgIndex, 1), 10);
       newImageIndices[contract.address] = bgIndex;
     });
 
@@ -588,53 +679,51 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
    * Uses Coinbase WebSocket API to get real-time price updates
    */
   useEffect(() => {
-    // Define the trading pairs we want to subscribe to
-    // Make sure these match the format used by Coinbase API (with hyphens)
-    const tradingPairs = ['BTC-USD', 'ETH-USD', 'ICP-USD'];
+    if (deployedContracts.length === 0) return;
 
-    // Get PriceService instance
+    // Get unique pairs from deployed contracts
+    const uniquePairs = Array.from(new Set(
+      deployedContracts.map(c => c.tradingPair.replace('/', '-'))
+    ));
+
+    // Get price service instance
     const priceService = PriceService.getInstance();
 
-    // Create a mapping function to convert from API format to display format
+    // Format pair for display
     const formatPairForDisplay = (apiSymbol: string) => apiSymbol.replace('-', '/');
 
-    // Subscribe to websocket updates
+    // Subscribe to WebSocket prices
     const unsubscribe = priceService.subscribeToWebSocketPrices((priceData) => {
-      // When we get a price update, update our state
-      // Convert the symbol format from API format (BTC-USD) to display format (BTC/USD)
       const displaySymbol = formatPairForDisplay(priceData.symbol);
-
       setAssetPrices(prev => ({
         ...prev,
         [displaySymbol]: priceData.price
       }));
+    }, uniquePairs);
 
-      console.log(`Updated price for ${displaySymbol}: $${priceData.price}`);
-    }, tradingPairs);
-
-    // Load initial prices directly
-    tradingPairs.forEach(async (pair) => {
+    // Fetch initial prices for unique pairs
+    uniquePairs.forEach(async (pair) => {
       try {
         const priceData = await priceService.fetchPrice(pair);
         const displaySymbol = formatPairForDisplay(pair);
-
         setAssetPrices(prev => ({
           ...prev,
           [displaySymbol]: priceData.price
         }));
-
-        console.log(`Initial price for ${displaySymbol}: $${priceData.price}`);
       } catch (error) {
         console.error(`Error fetching initial price for ${pair}:`, error);
       }
     });
 
-    // Clean up by unsubscribing when component unmounts
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    // Cleanup WebSocket subscription on unmount
+    return () => unsubscribe();
+  }, [deployedContracts]);
 
+
+  /**
+   * Calculates percentage of long and short positions for each contract
+   * Maps contract addresses to their respective percentages
+   */
   useEffect(() => {
     const newPercentages: { [key: string]: { long: number, short: number } } = {};
 
@@ -660,19 +749,56 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
       }
     });
 
+    // Update contract percentages state
     setContractPercentages(newPercentages);
   }, [currentContracts]);
 
+  /**
+   * State for storing market titles for each contract
+   * Maps contract addresses to their respective titles
+   */
+  const [marketTitles, setMarketTitles] = useState({});
+
+  /**
+   * Fetches market titles for all deployed contracts
+   * Maps contract addresses to their respective titles
+   */
+  useEffect(() => {
+    const fetchTitles = async () => {
+      const titles = {};
+      for (const contract of deployedContracts) {
+        titles[contract.address] = await getMarketTitleJSX(contract);
+      }
+      setMarketTitles(titles);
+    };
+
+    if (deployedContracts.length > 0) {
+      fetchTitles();
+    }
+  }, [deployedContracts]);
+
+  /**
+   * Filters contracts based on a search query
+   * @param {string} query - The search query to filter contracts by
+   * @returns {ContractData[]} - Array of filtered contracts
+   */
+  const filterContractsByQuery = (query: string) => {
+    const lowerCaseQuery = query.toLowerCase();
+    return deployedContracts.filter(contract => {
+      const title = getMarketTitleText(contract).toLowerCase();
+      return title.includes(lowerCaseQuery);
+    });
+  };
 
   return (
-    <Box bg="white" minH="100vh">
+    <Box bg="#0A0B0E" minH="100vh">
       {/* Application header with wallet connection status */}
       <Flex
         as="header"
         align="center"
         justify="space-between"
         p={4}
-        bg="white"
+        bg="#0A0B0E"
         borderBottom="1px"
         borderColor="gray.200"
         position="sticky"
@@ -680,29 +806,155 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         zIndex="sticky"
         boxShadow="sm"
       >
-        {/* Platform logo/name */}
-        <Text fontSize="xl" fontWeight="bold" color="gray.800">
-          OREKA
-        </Text>
+        {/* Left group: Logo + Search */}
+        <HStack spacing={6}>
+          <Text
+            fontSize="5xl"
+            fontWeight="bold"
+            bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
+            bgClip="text"
+            letterSpacing="wider"
+            textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
+            fontFamily="'Orbitron', sans-serif"
+          >
+            OREKA
+          </Text>
 
-        <Spacer />
-        {/* Conditional rendering based on wallet connection status */}
+          {/* Search input */}
+          <Box position="relative" maxW="600px" w="100%" height="50px" display="flex" alignItems="center">
+            <InputGroup ml="50px" w="500px" height="50px">
+              <Input
+                placeholder="Search OREKA"
+                value={searchQuery}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSearchQuery(value);
+                  if (value.trim() === '') {
+                    setSearchResults([]);
+                  } else {
+                    const results = filterContractsByQuery(value); 
+                    setSearchResults(results);
+                  }
+                }}
+                bg="#1A1C21"
+                color="white"
+                borderColor="gray.600"
+                borderRadius="3xl"
+                fontSize="md"
+                py={6}
+                px={4}
+                boxShadow="0 4px 10px rgba(0, 0, 0, 0.2)"
+                _placeholder={{ color: 'gray.400' }}
+                _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 2px rgba(66, 153, 225, 0.6)' }}
+                _hover={{ borderColor: 'blue.300' }}
+              />
+              <InputRightElement pointerEvents="none" height="90%" pr={4} mr="5px" mt="1px" mb="1px"
+                children={<Icon as={FaSearch} color="gray.400" />}
+                bg="#1A1C21"
+                borderColor="gray.600"
+                borderRadius="3xl"
+              />
+            </InputGroup>
+
+            {/* Search results */}
+            {searchResults.length > 0 && (
+              <Box
+                position="absolute"
+                top="60px"
+                left="0"
+                width="100%"
+                bg="gray.900"
+                borderRadius="lg"
+                boxShadow="xl"
+                zIndex="dropdown"
+                maxHeight="300px"
+                overflowY="auto"
+                border="1px solid"
+                borderColor="gray.700"
+              >
+                {searchResults.slice(0, 6).map((contract) => {
+                  const tradingPair = contract.tradingPair || "";
+                  const address = contract.address;
+                  const baseToken = tradingPair.split('/')[0]?.toLowerCase();
+                  const imageIndex = contractImageIndices?.[address] || 1;
+                  const imageSrc = `/images/${baseToken}/${baseToken}${imageIndex}.png`;
+
+                  return (
+                    <Box
+                      key={address}
+                      display="flex"
+                      alignItems="center"
+                      px={4}
+                      py={3}
+                      _hover={{ bg: "gray.700", cursor: "pointer" }}
+                      onClick={() => {
+                        handleAddressClick(contract.address, contract.owner, contract);
+                        setSearchQuery('');
+                        setSearchResults([]);
+                      }}
+                    >
+                      <Image
+                        src={imageSrc}
+                        alt="token"
+                        boxSize="32px"
+                        borderRadius="full"
+                        mr={4}
+                        fallbackSrc="/images/default-token.png"
+                      />
+                      <Text fontSize="sm" fontWeight="medium" color="white">
+                        {getMarketTitleJSX(contract)}
+                      </Text>
+                    </Box>
+                  );
+                })}
+              </Box>
+            )}
+          </Box>
+
+        </HStack>
+
+        {/* Right group: Wallet info */}
         {isConnected ? (
           <HStack spacing={4}>
-            {/* ETH balance display for connected users */}
+            <Box
+              mr="10px"
+              bg="#1A1C21"
+              borderRadius="3xl"
+              border="1px solid transparent"
+              backgroundImage="linear-gradient(to right, #00B894, #00A8FF)"
+              boxShadow="0 4px 10px rgba(0, 0, 0, 0.3)"
+            >
+              <Button
+                leftIcon={<GrDeploy />}
+                variant="solid"
+                color="white"
+                bg="#1A1C21"
+                borderRadius="3xl"
+                onClick={() => router.push('/owner')}
+                _hover={{
+                  bg: 'rgba(0, 183, 148, 0.8)',
+                  color: 'white',
+                  transform: 'scale(1.05)',
+                }}
+                _active={{
+                  transform: 'scale(0.95)',
+                }}
+              >
+                Deploy Markets
+              </Button>
+            </Box>
             <HStack
               p={2}
-              bg="gray.50"
+              bg="#1A1C21"
               borderRadius="md"
               borderWidth="1px"
               borderColor="gray.200"
             >
-              <Icon as={FaEthereum} color="blue.500" />
-              <Text color="gray.700" fontWeight="medium">
+              <Icon as={LiaCoinsSolid} color="#FEDF56" />
+              <Text color="#FEDF56" fontWeight="medium">
                 {parseFloat(balance).toFixed(4)} ETH
               </Text>
             </HStack>
-            {/* Connected wallet address (shortened) */}
             <Button
               leftIcon={<FaWallet />}
               colorScheme="blue"
@@ -713,7 +965,6 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             </Button>
           </HStack>
         ) : (
-          // {/* Connect wallet button for non-connected users */} 
           <Button
             leftIcon={<FaWallet />}
             colorScheme="blue"
@@ -724,6 +975,8 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
           </Button>
         )}
       </Flex>
+
+
 
       <Box p={6}>
         {/* Header with tabs */}
@@ -746,7 +999,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
           >
             <HStack spacing={4}>
               {/* List of tabs */}
-              {['All Markets', 'Most recent', 'Quests', 'Results', 'BTC/USD', 'ETH/USD', 'ICP/USD'].map((tab) => (
+              {['All Markets', 'Most recent', 'Quests', 'Results', 'BTC/USD', 'ETH/USD', 'LINK/USD', 'DAI/USD', 'USDC/USD'].map((tab) => (
                 <Button
                   key={tab}
                   size="md"
@@ -761,7 +1014,10 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                           tab === 'Results' ? <FaTrophy /> :
                             tab === 'BTC/USD' ? <SiBitcoinsv /> :
                               tab === 'ETH/USD' ? <FaEthereum /> :
-                                <FaCoins />
+                                tab === 'LINK/USD' ? <SiChainlink /> :
+                                  tab === 'DAI/USD' ? < SiDogecoin /> :
+                                    tab === 'USDC/USD' ? <IoLogoUsd /> :
+                                      <FaCoins />
                   }
                 >
                   {tab}
@@ -781,13 +1037,13 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             spacing={4}
             width="100%"
           >
-            {filteredContracts.map(({ address, createDate, longAmount, shortAmount, strikePrice, phase, maturityTime, tradingPair, owner }, index) => (
+            {filteredContracts.map(({ address, createDate, longAmount, shortAmount, phase, maturityTime, tradingPair, owner }, index) => (
 
               <Box
                 key={index}
                 p="2px"
                 borderRadius="lg"
-                background="linear-gradient(135deg, #00c6ff, #0072ff, #6a11cb, #2575fc)" // Gradient border
+                background="linear-gradient(135deg, #00c6ff, #0072ff, #6a11cb, #2575fc)" 
                 transition="transform 0.2s"
                 _hover={{ transform: 'translateY(-4px)' }}
                 cursor="pointer"
@@ -803,7 +1059,6 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                       createDate,
                       longAmount,
                       shortAmount,
-                      strikePrice,
                       phase,
                       maturityTime,
                       tradingPair,
@@ -851,141 +1106,92 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     </Box>
                   </Box>
 
-                  {/* Info section in the middle - Giảm padding và margin */}
+                  {/* Info section in the middle */}
                   <Box p={3}>
-                    {/* Phase indicator - Giảm margin bottom */}
+                    {/* Phase indicator */}
 
 
-                    {/* Market title - Giảm margin bottom */}
-                    <Text fontWeight="bold" mb={1} color="white" fontSize="xl">
-                      {cleanupMarketTitle(getMarketTitle({ address, createDate, longAmount, shortAmount, strikePrice, phase, maturityTime, tradingPair, owner }))}
-                    </Text>
+                    {/* Market title */}
+                    <Box fontSize="xl" fontWeight="semibold" color="white" mb={2}>
+                      {marketTitles[address] || "Loading..."}
+                    </Box>
 
 
-                    {/* LONG/SHORT ratio */}
-                    <Flex
-                      align="center"
-                      w="100%"
-                      h="25px"
-                      borderRadius="full"
-                      bg="gray.800"
-                      border="1px solid"
-                      borderColor="gray.600"
-                      position="relative"
-                      overflow="hidden"
-                      boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
-                      mb={4}
-                    >
-                      {/* LONG Section */}
-                      <Box
-                        width={`${contractPercentages[address]?.long}%`}
-                        bgGradient="linear(to-r, #0f0c29, #00ff87)"
-                        transition="width 0.6s ease"
-                        h="full"
-                        display="flex"
-                        alignItems="center"
-                        justifyContent="flex-end"
-                        pr={3}
-                        position="relative"
-                        zIndex={1}
-                      >
-                        {contractPercentages[address]?.long > 8 && (
-                          <Text
-                            fontSize="sm"
-                            fontWeight="bold"
-                            color="whiteAlpha.800"
-                          >
-                            {contractPercentages[address]?.long.toFixed(0)}%
-                          </Text>
-                        )}
-                      </Box>
-
-                      {/* SHORT Section (in absolute layer for smooth overlap) */}
-                      <Box
-                        position="absolute"
-                        right="0"
-                        top="0"
-                        h="100%"
-                        width={`${contractPercentages[address]?.short}%`}
-                        bgGradient="linear(to-r, #ff512f, #dd2476)"
-                        transition="width 0.6s ease"
-                        display="flex"
-                        alignItems="center"
-                        justifyContent="flex-start"
-                        pl={3}
-                        zIndex={0}
-                      >
-                        {contractPercentages[address]?.short > 8 && (
-                          <Text
-                            fontSize="sm"
-                            fontWeight="bold"
-                            color="whiteAlpha.800"
-                          >
-                            {contractPercentages[address]?.short.toFixed(0)}%
-                          </Text>
-                        )}
-                      </Box>
-                    </Flex>
-
-                    <Flex justify="space-between" align="center" mb={2}>
-                      <Box>
-                        <Button fontSize="sm"
-                          color="#1E4146"
-                          textAlign="right"
-                          w="200px"
-                          h="45px"
-                          borderRadius="full"
-                          bg="#1B3B3F"
+                    <HStack direction="column" w="100%" mb={4} width="650px">
+                      {Number(phase) === Phase.Maturity || Number(phase) === Phase.Expiry ? (
+                        <Box
+                          w="380px"
+                          py={2}
+                          alignItems="center"
+                          borderRadius="md"
+                          bg={determineMarketResult(Number(longAmount), Number(shortAmount)) === 'LONG' ? "#1B3B3F" : "#3D243A"}
                           border="1px solid"
                           borderColor="gray.600"
-                          boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
-                          textColor="#20BCBB"
-                          _hover={{
-                            bg: "green.500",
-                            color: "white",
-                          }}
-                          ml={3}
+                          textAlign="center"
                         >
-                          LONG
-                        </Button>
-                      </Box>
-                      <Box>
-                        <Button fontSize="sm"
-                          color="#3D243A"
-                          textAlign="right"
-                          w="200px"
-                          h="45px"
-                          borderRadius="full"
-                          bg="#3D243A"
-                          border="1px solid"
-                          borderColor="gray.600"
-                          textColor="#FF6492"
-                          boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
-                          _hover={{
-                            bg: "red.500",
-                            color: "white",
-                          }}
-                          mr={3}
-                        >
-                          SHORT
-                        </Button>
-                      </Box>
-                    </Flex>
+                          <Text
+                            fontSize="md"
+                            fontWeight="bold"
+                            color={determineMarketResult(Number(longAmount), Number(shortAmount)) === 'LONG' ? "#20BCBB" : "#FF6492"}
+                          >
+                            {determineMarketResult(Number(longAmount), Number(shortAmount))}
+                          </Text>
+                        </Box>
+                      ) : (
+                        <>
+                          {/* Percentage LONG */}
+                          <Flex justify="space-between" mb={1}>
+                            <Text fontSize="sm" fontWeight="bold" color="#5FDCC6" textAlign="left">
+                              {contractPercentages[address]?.long.toFixed(0)}%
+                            </Text>
+                          </Flex>
 
+                          {/* Long/Short bar */}
+                          <Flex
+                            w="100%"
+                            h="13px"
+                            borderRadius="full"
+                            overflow="hidden"
+                            border="1px solid"
+                            borderColor="gray.600"
+                            bg="gray.800"
+                            boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                            mt="20px"
+                            mb="10px"
+                          >
+                            <Box
+                              h="100%"
+                              w={`${contractPercentages[address]?.long}%`}
+                              bgGradient="linear(to-r, #00ea00, #56ff56, #efef8b)"
+                              transition="width 0.6s ease"
+                            />
+
+                            <Box
+                              h="100%"
+                              w={`${contractPercentages[address]?.short}%`}
+                              bgGradient="linear(to-r, #FF6B81, #D5006D)"
+                              transition="width 0.6s ease"
+                            />
+                          </Flex>
+
+                          {/* Percentage SHORT */}
+                          <Flex justify="space-between" w="100%">
+                            <Text fontSize="sm" fontWeight="bold" color="#ED5FA7" textAlign="left">
+                              {contractPercentages[address]?.short.toFixed(0)}%
+                            </Text>
+                          </Flex>
+                        </>
+                      )}
+                    </HStack>
+
+
+                    {/* Divider */}
                     <Divider my={4} borderColor="gray.600" />
 
+                    {/* Price and time remaining */}
                     <Flex justify="space-between" align="center">
                       <HStack spacing={2}>
-                        <Icon
-                          as={
-                            tradingPair.includes("BTC")
-                              ? SiBitcoinsv
-                              : tradingPair.includes("ETH")
-                                ? FaEthereum
-                                : GoInfinity
-                          }
-                          color="blue.300"
-                        />
+                        <Icon as={getIconBySymbol(tradingPair)} color="blue.300" boxSize={6} />
                         <Text fontWeight="bold" fontSize="lg" color="white">
                           {assetPrices[tradingPair]
                             ? `$${assetPrices[tradingPair].toLocaleString(undefined, {
