@@ -17,10 +17,10 @@ const ListAddressPage = () => {
             const authClient = await AuthClient.create();
 
             // Determine if we're in development environment and use local II canister
-            const isDevelopment = process.env.NODE_ENV === 'development';
-            const iiUrl = isDevelopment
-                ? `http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943`
-                : process.env.NEXT_PUBLIC_II_URL || "https://identity.ic0.app";
+            const isProduction = process.env.NODE_ENV === 'production';
+            const iiUrl = isProduction
+                ? process.env.NEXT_PUBLIC_II_URL || "https://identity.ic0.app"
+                : `http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943`;
 
             console.log("Using II URL:", iiUrl);
 

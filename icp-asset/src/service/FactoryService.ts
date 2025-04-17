@@ -259,19 +259,28 @@ export class FactoryApiService {
     // Additional API methods
     async getAllContracts(): Promise<ApiResult<any[]>> {
         try {
-            console.log("Fetching all contracts");
+            console.log("Fetching all contracts from factory");
+
+            // Call the actor method to get all contracts from the factory
             const contracts = await this.factoryActor.getAllContracts();
-            console.log("Contracts found:", contracts.length);
-            return {
-                ok: contracts,
-                err: null
-            };
+
+            console.log("Raw contracts result:", contracts);
+
+            // If we received a valid response
+            if (contracts && Array.isArray(contracts)) {
+                return {
+                    ok: contracts.filter(contract =>
+                        contract && contract.type &&
+                        ('BinaryOptionMarket' in contract.type || 'ICRC1Token' in contract.type)
+                    ),
+                    err: null
+                };
+            } else {
+                return { ok: [], err: "No contracts returned from factory" };
+            }
         } catch (error) {
-            console.error("Error fetching contracts:", error);
-            return {
-                ok: null,
-                err: `Failed to fetch contracts: ${error instanceof Error ? error.message : String(error)}`
-            };
+            console.error("Error fetching all contracts:", error);
+            return { ok: null, err: error instanceof Error ? error.message : "Unknown error" };
         }
     }
 

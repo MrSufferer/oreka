@@ -74,6 +74,13 @@ interface Contract {
     type: any; // ContractType
     created: bigint;
     owner: any; // Principal
+    metadata?: {
+        strikePrice?: string;
+        maturityDate?: string;
+        symbol?: string;
+        decimals?: number;
+        totalSupply?: string;
+    };
 }
 
 // Transformed contracts for display
@@ -154,17 +161,29 @@ const ListMarketsMui: React.FC<ListMarketsProps> = ({ userPrincipal, page = 1 })
                         canister_id: contract.address.toString(),
                         created: new Date(Number(contract.created) / 1000000).toLocaleString(),
                         owner: contract.owner.toString(),
-                        status: Math.random() > 0.5 ? 'active' : Math.random() > 0.5 ? 'pending' : 'completed'
+                        status: 'active' // Default to active status
                     };
 
-                    // Add type-specific mock data
-                    if (contractType === 'BinaryOptionMarket') {
-                        displayContract.strikePrice = `$${(Math.random() * 1000).toFixed(2)}`;
-                        displayContract.maturityDate = new Date(Date.now() + Math.random() * 30 * 24 * 60 * 60 * 1000).toLocaleDateString();
-                    } else if (contractType === 'ICRC1Token') {
-                        displayContract.symbol = contract.title.split(' ')[0].substring(0, 4).toUpperCase();
-                        displayContract.decimals = 8;
-                        displayContract.totalSupply = (Math.random() * 1000000).toFixed(0);
+                    // Add type-specific data only if it's available in the contract metadata
+                    if (contractType === 'BinaryOptionMarket' && contract.metadata) {
+                        if (contract.metadata.strikePrice) {
+                            displayContract.strikePrice = `$${contract.metadata.strikePrice}`;
+                        }
+                        if (contract.metadata.maturityDate) {
+                            displayContract.maturityDate = new Date(Number(contract.metadata.maturityDate)).toLocaleDateString();
+                        }
+                    } else if (contractType === 'ICRC1Token' && contract.metadata) {
+                        if (contract.metadata.symbol) {
+                            displayContract.symbol = contract.metadata.symbol;
+                        } else {
+                            displayContract.symbol = contract.title.split(' ')[0].substring(0, 4).toUpperCase();
+                        }
+                        if (contract.metadata.decimals) {
+                            displayContract.decimals = contract.metadata.decimals;
+                        }
+                        if (contract.metadata.totalSupply) {
+                            displayContract.totalSupply = contract.metadata.totalSupply.toString();
+                        }
                     }
 
                     return displayContract;

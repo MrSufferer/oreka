@@ -201,9 +201,9 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
                             <Line
                                 type="monotone"
                                 dataKey="close"
-                                stroke="#ff6a00"
-                                dot={false}
+                                stroke="#00ff87"
                                 strokeWidth={2}
+                                dot={false}
                                 animationDuration={500}
                             />
                         </LineChart>
@@ -238,25 +238,33 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
                         <AreaChart
                             data={positionData}
                             margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                            stackOffset="expand"
                         >
+                            <defs>
+                                <linearGradient id="colorLong" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#00ff87" stopOpacity={0.8} />
+                                    <stop offset="95%" stopColor="#0f0c29" stopOpacity={0.2} />
+                                </linearGradient>
+                                <linearGradient id="colorShort" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#ff416c" stopOpacity={0.8} />
+                                    <stop offset="95%" stopColor="#ff4b2b" stopOpacity={0.2} />
+                                </linearGradient>
+                            </defs>
                             <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                             <XAxis
                                 dataKey="timestamp"
                                 domain={['auto', 'auto']}
                                 name="Time"
                                 tickFormatter={formatPositionXAxisTick}
+                                ticks={getPriceChartTicks()}
                                 type="number"
                                 stroke="#666"
                             />
                             <YAxis
                                 tickFormatter={(value) => `${(value * 100).toFixed(0)}%`}
+                                domain={[0, 1]}
                                 stroke="#666"
                             />
-                            <Tooltip
-                                formatter={(value) => [`${(Number(value) * 100).toFixed(2)}%`, 'Percentage']}
-                                labelFormatter={(label) => format(new Date(label), 'MMM dd, yyyy HH:mm')}
-                            />
+                            <Tooltip content={<CustomTooltip />} />
                             <Area
                                 type="monotone"
                                 dataKey="longPercentage"
@@ -275,16 +283,6 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
                                 fillOpacity={0.8}
                                 name="Short"
                             />
-                            <defs>
-                                <linearGradient id="colorLong" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#00ff87" stopOpacity={0.8} />
-                                    <stop offset="95%" stopColor="#0f0c29" stopOpacity={0.2} />
-                                </linearGradient>
-                                <linearGradient id="colorShort" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#ff416c" stopOpacity={0.8} />
-                                    <stop offset="95%" stopColor="#ff4b2b" stopOpacity={0.2} />
-                                </linearGradient>
-                            </defs>
                         </AreaChart>
                     </ResponsiveContainer>
                 )}

@@ -3,14 +3,14 @@ import { useCallback } from 'react'; // Thêm import useCallback
 import {
     Flex, Box, Text, Button, VStack, useToast, Input,
     Select, HStack, Icon, ScaleFade, Table, Thead, Tbody, Tr, Th, Td, TableContainer,
-    Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Divider, Circle, Spacer
+    Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Divider, Circle, Spacer, FormControl, FormLabel
 } from '@chakra-ui/react';
-import { FaEthereum, FaWallet, FaTrophy, FaRegClock, FaArrowUp, FaArrowDown, FaCoins } from 'react-icons/fa';
+import { FaEthereum, FaWallet, FaTrophy, FaRegClock, FaArrowUp, FaArrowDown, FaCoins, FaChartLine } from 'react-icons/fa';
 import { GoInfinity } from "react-icons/go";
 import { PiChartLineUpLight } from "react-icons/pi";
 import { SiBitcoinsv } from "react-icons/si";
 import { useRouter } from 'next/router';
-import { BinaryOptionMarketService, IBinaryOptionMarketService } from '../service/binary-option-market-service';
+import { BinaryOptionMarketService, IBinaryOptionMarketService, Phase } from '../service/binary-option-market-service';
 import { Principal } from '@dfinity/principal';
 import { current } from '@reduxjs/toolkit';
 import { AuthClient } from '@dfinity/auth-client';
@@ -19,6 +19,7 @@ import { IIcpLedgerService, IcpLedgerService } from '../service/icp-ledger-servi
 import { format } from 'date-fns';
 import { PriceService, PriceData } from '../service/price-service';
 import MarketCharts from './charts/MarketCharts';
+import { CheckIcon } from '@chakra-ui/icons';
 
 // Add typings import for ICRC1 Account
 import type { Account as ICRC1Account } from '../service/icp-ledger-service';
@@ -27,7 +28,6 @@ import type { Account as ICRC1Account } from '../service/icp-ledger-service';
 import { FactoryService, MarketInfo } from '../service/factory-service';
 
 enum Side { Long, Short }
-enum Phase { Bidding, Trading, Maturity, Expiry }
 
 interface Coin {
     value: string;
@@ -92,6 +92,7 @@ function Customer({ contractAddress }: CustomerProps) {
     const [marketId, setMarketId] = useState<string | null>(null);
     // Add state to track if user is admin
     const [isAdmin, setIsAdmin] = useState(false);
+    const [isOwner, setIsOwner] = useState(false); // Add state for owner check
 
     // Add a state to track if we need to show the market selection view
     const [showMarketSelection, setShowMarketSelection] = useState(false);
@@ -247,31 +248,17 @@ function Customer({ contractAddress }: CustomerProps) {
                 return;
             }
 
-            console.log("FETCH DETAILS: Getting current phase");
-            const phaseState = await marketService.getCurrentPhase();
-            console.log("FETCH DETAILS: Current phase state:", phaseState);
+            // First get the market phase
+            const phase = await marketService.getPhase();
+            console.log("FETCH DETAILS: Current phase:", phase);
+            setCurrentPhase(phase);
 
-            //@TODO: Make this a function
-            if (('Trading' in phaseState)) {
-                setCurrentPhase(Phase.Trading);
-            } else if (('Bidding' in phaseState)) {
-                setCurrentPhase(Phase.Bidding);
-            } else if (('Maturity' in phaseState)) {
-                setCurrentPhase(Phase.Maturity);
-            } else if (('Expiry' in phaseState)) {
-                setCurrentPhase(Phase.Expiry);
-            }
+            // Check if user is admin or owner
+            await checkIsAdmin();
 
             console.log("FETCH DETAILS: Getting market details");
             const marketDetails = await marketService.getMarketDetails();
             console.log("FETCH DETAILS: Market details:", marketDetails);
-
-            // Check if user is market owner/admin
-            if (marketDetails && marketDetails.owner && identityPrincipal) {
-                const isOwner = marketDetails.owner.toText() === identityPrincipal;
-                setIsAdmin(isOwner);
-                console.log("FETCH DETAILS: User is admin:", isOwner);
-            }
 
             const strikePrice = marketDetails.oracleDetails.strikePrice;
             const finalPrice = marketDetails.oracleDetails.finalPrice;
@@ -844,24 +831,54 @@ function Customer({ contractAddress }: CustomerProps) {
         }
     };
 
-    // Add function to check if current user is admin
+    // Modify the checkIsAdmin function to include more debug info
     const checkIsAdmin = async () => {
-        try {
-            if (!marketService || !identityPrincipal) return false;
+        if (!marketService) {
+            console.log("DEBUG: checkIsAdmin - marketService not available");
+            return;
+        }
 
-            const marketDetails = await marketService.getMarketDetails();
-            if (marketDetails && marketDetails.owner) {
-                // Check if current user is the market owner
-                const isOwner = marketDetails.owner.toText() === identityPrincipal;
-                setIsAdmin(isOwner);
-                return isOwner;
-            }
-            return false;
+        try {
+            // Check if the user is an admin of the market
+            const isAdmin = await marketService.isAdmin();
+            console.log("DEBUG: checkIsAdmin - isAdmin result:", isAdmin);
+            setIsAdmin(isAdmin);
+
+            // Check if the user is the owner of the market
+            const owner = await marketService.getOwner();
+            const currentPrincipal = identityPrincipal;
+
+            console.log("DEBUG: Owner check details:", {
+                owner,
+                currentPrincipal,
+                isMatch: owner === currentPrincipal
+            });
+
+            // Log comparison in different formats to debug
+            console.log(`DEBUG: Owner (${owner.length} chars): ${owner}`);
+            console.log(`DEBUG: Current Principal (${currentPrincipal?.length} chars): ${currentPrincipal}`);
+
+            setIsOwner(owner === currentPrincipal);
+            console.log("DEBUG: Setting isOwner to:", owner === currentPrincipal);
         } catch (error) {
             console.error("Error checking admin status:", error);
-            return false;
         }
     };
+
+    // Add a function call to check admin status when marketId changes
+    useEffect(() => {
+        if (authenticated && marketId && marketService) {
+            checkIsAdmin();
+        }
+    }, [authenticated, marketId, marketService, identityPrincipal]);
+
+    // Add a new useEffect to call fetchMarketDetails after initialization
+    useEffect(() => {
+        if (authenticated && marketService && identityPrincipal) {
+            console.log("Component is authenticated and marketService is ready - fetching details");
+            fetchMarketDetails();
+        }
+    }, [authenticated, marketService, identityPrincipal, fetchMarketDetails]);
 
     return (
         <Flex direction="column" alignItems="center" justifyContent="flex-start" p={6} bg="black" minH="100vh" position="relative">
@@ -891,9 +908,9 @@ function Customer({ contractAddress }: CustomerProps) {
                             Markets
                         </Button>
 
-                        <HStack spacing={6} ml="auto" color="#FEDF56">
+                        <HStack spacing={6} ml="auto" color="#e2e8f0">
                             <Icon as={FaWallet} />
-                            <Text>{abbreviateAddress(identityPrincipal)}</Text>
+                            <Text>{abbreviateAddress(identityPrincipal || '')}</Text>
                             <Icon as={GoInfinity} />
                             <Text>Balance: {balance} ICP</Text>
                         </HStack>
@@ -1097,17 +1114,18 @@ function Customer({ contractAddress }: CustomerProps) {
                                     h="25px"
                                     borderRadius="full"
                                     bg="gray.800"
-                                    border="1px solid"
-                                    borderColor="gray.600"
+                                    border="5px solid"
+                                    borderColor="gray.400"
                                     position="relative"
                                     overflow="hidden"
                                     boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
                                     mb={4}
+                                    p={0}
                                 >
                                     {/* LONG Section */}
                                     <Box
                                         width={`${longPercentage}%`}
-                                        bgGradient="linear(to-r, #0f0c29, #00ff87)"
+                                        bgGradient="linear(to-r, #00ea00, #56ff56, #efef8b)"
                                         transition="width 0.6s ease"
                                         h="full"
                                         display="flex"
@@ -1135,7 +1153,7 @@ function Customer({ contractAddress }: CustomerProps) {
                                         top="0"
                                         h="100%"
                                         width={`${shortPercentage}%`}
-                                        bgGradient="linear(to-r, #ff512f, #dd2476)"
+                                        bgGradient="linear(to-r, #FF6B81, #D5006D)"
                                         transition="width 0.6s ease"
                                         display="flex"
                                         alignItems="center"
@@ -1157,45 +1175,91 @@ function Customer({ contractAddress }: CustomerProps) {
 
                                 <Text textAlign="center" fontSize="md" mb={4} color="gray.400">You're betting</Text>
 
-                                <Input
-                                    placeholder="Enter bid amount in ICP"
-                                    value={bidAmount}
-                                    onChange={(e) => {
-                                        const value = e.target.value;
-                                        if (/^\d*\.?\d*$/.test(value)) setBidAmount(value);
-                                    }}
-                                    color="#FEDF56"
-                                    bg="transparent"
-                                    border="1px solid"
-                                    borderColor="gray.600"
-                                    textAlign="center"
-                                    _placeholder={{ color: "gray.500" }}
-                                    size="lg"
-                                    mb={4}
-                                />
+                                <HStack spacing={4} mb={3} ml={2} mr={2}>
+                                    <Button
+                                        border="1px solid"
+                                        borderColor="gray.300"
+                                        borderRadius="20px"
+                                        colorScheme="gray"
+                                        bg="gray.800"
+                                        width="50%"
+                                        onClick={() => setSelectedSide(Side.Long)}
+                                        leftIcon={<FaArrowUp />}
+                                        textColor="#28a745"
+                                        textShadow="1px 1px 12px rgba(40, 167, 69, 0.7)"
+                                        isDisabled={currentPhase !== Phase.Bidding}
+                                        _hover={{
+                                            bg: "gray.700",
+                                            boxShadow: "0 4px 8px rgba(40, 167, 69, 0.2)",
+                                        }}
+                                        _active={{
+                                            bg: "#cececc",
+                                        }}
+                                        isActive={selectedSide === Side.Long}
+                                    >
+                                        UP
+                                    </Button>
+                                    <Button
+                                        border="1px solid"
+                                        borderColor="gray.300"
+                                        borderRadius="20px"
+                                        colorScheme="gray"
+                                        bg="gray.800"
+                                        width="50%"
+                                        onClick={() => setSelectedSide(Side.Short)}
+                                        leftIcon={<FaArrowDown />}
+                                        textColor="#dc3545"
+                                        textShadow="1px 1px 12px rgba(220, 53, 69, 0.7)"
+                                        isDisabled={currentPhase !== Phase.Bidding}
+                                        _hover={{
+                                            bg: "gray.700",
+                                            boxShadow: "0 4px 8px rgba(220, 53, 69, 0.2)",
+                                        }}
+                                        _active={{
+                                            bg: "#cececc",
+                                        }}
+                                        isActive={selectedSide === Side.Short}
+                                    >
+                                        DOWN
+                                    </Button>
+                                </HStack>
 
-                                <Button
-                                    onClick={() => handleBid(Side.Long, Number(bidAmount))}
-                                    isDisabled={!bidAmount || Number(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
-                                    bg="#00ff87"
-                                    color="black"
-                                    _hover={{ opacity: 0.8 }}
-                                    width="100%"
-                                    mb={2}
-                                >
-                                    LONG
-                                </Button>
+                                <FormControl mb={2} mt={6} color="white">
+                                    <FormLabel>You're betting</FormLabel>
+                                    <Input
+                                        placeholder="Enter amount in ICP"
+                                        bg="gray.800"
+                                        color="white"
+                                        borderColor="gray.600"
+                                        borderRadius="md"
+                                        mb={3}
+                                        ml={2}
+                                        mr={2}
+                                        value={bidAmount}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (/^\d*\.?\d*$/.test(value)) setBidAmount(value);
+                                        }}
+                                    />
+                                </FormControl>
 
-                                <Button
-                                    onClick={() => handleBid(Side.Short, Number(bidAmount))}
-                                    isDisabled={!bidAmount || Number(bidAmount) <= 0 || currentPhase !== Phase.Bidding}
-                                    bg="#ff416c"
-                                    color="white"
-                                    _hover={{ opacity: 0.8 }}
-                                    width="100%"
-                                >
-                                    SHORT
-                                </Button>
+                                <HStack spacing={2} mt={1} mb={2} ml={2} mr={2} alignItems="center" justifyContent="center">
+                                    <Button
+                                        colorScheme="#0040C1"
+                                        bg="#0040C1"
+                                        color="white"
+                                        _hover={{ bg: "#0040C1" }}
+                                        width="100%"
+                                        py={6}
+                                        mb={3}
+                                        ml={2}
+                                        mr={2}
+                                        onClick={() => handleBid(selectedSide || Side.Long, Number(bidAmount))}
+                                        isDisabled={!bidAmount || Number(bidAmount) <= 0 || selectedSide === null || currentPhase !== Phase.Bidding}
+                                    >
+                                        Betting to rich
+                                    </Button>
+                                </HStack>
 
                                 <Divider my={4} />
 
@@ -1204,11 +1268,11 @@ function Customer({ contractAddress }: CustomerProps) {
 
                                 <Text fontSize="md" fontWeight="bold" color="white" mb={2}>Your Position</Text>
                                 <HStack justify="space-between" mb={1}>
-                                    <Text color="#00ff87">LONG:</Text>
+                                    <Text color="#56ff56">LONG:</Text>
                                     <Text color="white">{positions.long.toFixed(4)} ICP</Text>
                                 </HStack>
                                 <HStack justify="space-between">
-                                    <Text color="#ff416c">SHORT:</Text>
+                                    <Text color="#FF6B81">SHORT:</Text>
                                     <Text color="white">{positions.short.toFixed(4)} ICP</Text>
                                 </HStack>
                             </Box>
@@ -1234,24 +1298,30 @@ function Customer({ contractAddress }: CustomerProps) {
 
                             {/* Market Timeline */}
                             <Box
-                                bg="gray.800"
+                                bg="#222530"
                                 p={4}
-                                borderRadius="xl"
                                 borderWidth={1}
                                 borderColor="gray.700"
+                                borderRadius="30px"
                                 position="relative"
+                                height="320px"
                                 mb={4}
                             >
-                                <Text fontSize="md" fontWeight="bold" color="white" mb={4} textAlign="center">
+                                <Text fontSize="2xl" fontWeight="bold" mb={4} mt={2} color="#gray.600" textAlign="center">
                                     Market is Live
                                 </Text>
 
                                 <Box
-                                    bg="#1A202C"
+                                    bg="#0B0E16"
                                     p={4}
-                                    borderRadius="xl"
+                                    borderRadius="30px"
                                     borderWidth={1}
                                     borderColor="gray.700"
+                                    position="absolute"
+                                    top="70px"
+                                    left="0"
+                                    right="0"
+                                    zIndex={1}
                                 >
                                     <VStack align="stretch" spacing={3} position="relative">
                                         {/* Vertical Line */}
@@ -1267,9 +1337,11 @@ function Customer({ contractAddress }: CustomerProps) {
 
                                         {/* Trading Phase */}
                                         <HStack spacing={4}>
-                                            <Circle size="35px" bg={currentPhase === Phase.Trading ? "green.400" : "gray.700"} color="white">1</Circle>
+                                            <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">
+                                                {currentPhase >= Phase.Bidding ? <CheckIcon boxSize={4} /> : '1'}
+                                            </Circle>
                                             <VStack align="start" spacing={0} fontWeight="bold">
-                                                <Text fontSize="md" color={currentPhase === Phase.Trading ? "green.400" : "gray.500"}>
+                                                <Text fontSize="lg" color={currentPhase === Phase.Trading ? "green.400" : "gray.500"}>
                                                     Trading
                                                 </Text>
                                                 <Text fontSize="xs" color="gray.500">
@@ -1277,35 +1349,46 @@ function Customer({ contractAddress }: CustomerProps) {
                                                 </Text>
                                             </VStack>
                                             <Spacer />
-                                            {currentPhase === Phase.Trading && isAdmin && (
+                                            {currentPhase === Phase.Trading && (
                                                 <Button
-                                                    onClick={async () => {
-                                                        try {
-                                                            if (marketService) {
-                                                                await marketService.startTrading();
-                                                                await fetchMarketDetails();
-                                                            }
-                                                        } catch (error) {
-                                                            console.error("Error starting bidding:", error);
+                                                    colorScheme="green"
+                                                    size="md"
+                                                    leftIcon={<FaChartLine />}
+                                                    onClick={() => {
+                                                        if (marketService) {
+                                                            marketService.startTrading()
+                                                                .then(() => {
+                                                                    toast({
+                                                                        title: "Market moved to Bidding phase",
+                                                                        status: "success",
+                                                                        duration: 5000,
+                                                                    });
+                                                                    // Refresh data after state change
+                                                                    fetchMarketDetails();
+                                                                })
+                                                                .catch(error => {
+                                                                    toast({
+                                                                        title: "Error",
+                                                                        description: error.toString(),
+                                                                        status: "error",
+                                                                        duration: 5000,
+                                                                    });
+                                                                });
                                                         }
                                                     }}
-                                                    size="sm"
-                                                    colorScheme="yellow"
-                                                    bg="#FEDF56"
-                                                    color="black"
-                                                    _hover={{ bg: "#FFE56B" }}
-                                                    width="35%"
                                                 >
-                                                    Start Bidding
+                                                    Start Trading
                                                 </Button>
                                             )}
                                         </HStack>
 
                                         {/* Bidding Phase */}
                                         <HStack spacing={4}>
-                                            <Circle size="35px" bg={currentPhase === Phase.Bidding ? "blue.400" : "gray.700"} color="white">2</Circle>
+                                            <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">
+                                                {currentPhase >= Phase.Maturity ? <CheckIcon boxSize={4} /> : '2'}
+                                            </Circle>
                                             <VStack align="start" spacing={0} fontWeight="bold">
-                                                <Text fontSize="md" color={currentPhase === Phase.Bidding ? "blue.400" : "gray.500"}>
+                                                <Text fontSize="lg" color={currentPhase === Phase.Bidding ? "blue.400" : "gray.500"}>
                                                     Bidding
                                                 </Text>
                                                 <Text fontSize="xs" color="gray.500">
@@ -1313,7 +1396,7 @@ function Customer({ contractAddress }: CustomerProps) {
                                                 </Text>
                                             </VStack>
                                             <Spacer />
-                                            {currentPhase === Phase.Bidding && isAdmin && (
+                                            {currentPhase === Phase.Bidding && (
                                                 <Button
                                                     onClick={async () => {
                                                         try {
@@ -1340,9 +1423,11 @@ function Customer({ contractAddress }: CustomerProps) {
                                         {/* Maturity Phase */}
                                         <HStack spacing={4} justify="space-between">
                                             <HStack spacing={4}>
-                                                <Circle size="35px" bg={currentPhase === Phase.Maturity ? "orange.400" : "gray.700"} color="white">3</Circle>
+                                                <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">
+                                                    {currentPhase >= Phase.Expiry ? <CheckIcon boxSize={4} /> : '3'}
+                                                </Circle>
                                                 <VStack align="start" spacing={0} fontWeight="bold">
-                                                    <Text fontSize="md" color={currentPhase === Phase.Maturity ? "orange.400" : "gray.500"}>
+                                                    <Text fontSize="lg" color={currentPhase === Phase.Maturity ? "orange.400" : "gray.500"}>
                                                         Maturity
                                                     </Text>
                                                     <Text fontSize="xs" color="gray.500">
@@ -1351,7 +1436,7 @@ function Customer({ contractAddress }: CustomerProps) {
                                                 </VStack>
                                             </HStack>
                                             <Spacer />
-                                            {currentPhase === Phase.Maturity && finalPrice && isAdmin && (
+                                            {currentPhase === Phase.Maturity && finalPrice && (
                                                 <Button
                                                     onClick={async () => {
                                                         try {
@@ -1377,9 +1462,9 @@ function Customer({ contractAddress }: CustomerProps) {
 
                                         {/* Expiry Phase */}
                                         <HStack spacing={4}>
-                                            <Circle size="35px" bg={currentPhase === Phase.Expiry ? "red.400" : "gray.700"} color="white">4</Circle>
+                                            <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">4</Circle>
                                             <VStack align="start" spacing={0} fontWeight="bold">
-                                                <Text fontSize="md" color={currentPhase === Phase.Expiry ? "red.400" : "gray.500"}>
+                                                <Text fontSize="lg" color={currentPhase === Phase.Expiry ? "red.400" : "gray.500"}>
                                                     Expiry
                                                 </Text>
                                                 <Text fontSize="xs" color="gray.500">

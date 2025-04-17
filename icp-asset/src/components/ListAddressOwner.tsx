@@ -2,12 +2,12 @@ import React, { useEffect, useState } from 'react';
 import {
     Box, Button, HStack, Icon, Text, VStack, SimpleGrid, Flex,
     Input, Select, Divider, Progress, Tooltip, Spacer, Image,
-    Spinner
+    Spinner, InputGroup, InputRightElement
 } from '@chakra-ui/react';
 import {
     FaCalendarDay, FaPlayCircle, FaClock, FaCheckCircle,
     FaListAlt, FaRegClock, FaEthereum, FaWallet, FaTrophy,
-    FaArrowUp, FaArrowDown, FaCoins
+    FaArrowUp, FaArrowDown, FaCoins, FaSearch
 } from 'react-icons/fa';
 import { IoWalletOutline } from "react-icons/io5";
 import { SiBitcoinsv } from "react-icons/si";
@@ -154,6 +154,17 @@ const shortenAddress = (address: string) => {
     return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
 };
 
+// New function to determine market result
+const determineMarketResult = (longAmount: number, shortAmount: number): string => {
+    if (longAmount > shortAmount) {
+        return 'LONG';
+    } else if (shortAmount > longAmount) {
+        return 'SHORT';
+    } else {
+        return 'TIE';
+    }
+};
+
 function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
     const [contracts, setContracts] = useState<ContractData[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -167,6 +178,8 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
     const [contractImageIndices, setContractImageIndices] = useState<{ [key: string]: number }>({});
     const [countdowns, setCountdowns] = useState<{ [key: string]: string }>({});
     const [balance, setBalance] = useState("0");
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<ContractData[]>([]);
 
     const CONTRACTS_PER_PAGE = 10;
     const router = useRouter();
@@ -428,66 +441,186 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
         return FaCoins;
     };
 
+    // Add search functionality
+    const filterContractsByQuery = (query: string) => {
+        const lowerCaseQuery = query.toLowerCase();
+        return contracts.filter(contract => {
+            const title = getMarketTitle(contract).toLowerCase();
+            return title.includes(lowerCaseQuery);
+        });
+    };
+
     return (
-        <Box bg="black" minH="100vh">
-            {/* Application header with wallet connection status */}
+        <Box bg="#0A0B0E" minH="100vh">
+            {/* Application header with search and wallet info */}
             <Flex
                 as="header"
                 align="center"
                 justify="space-between"
                 p={4}
-                bg="black"
+                bg="#0A0B0E"
                 borderBottom="1px"
-                borderColor="gray.800"
+                borderColor="gray.700"
                 position="sticky"
                 top="0"
                 zIndex="sticky"
                 boxShadow="sm"
             >
-                {/* Platform logo/name */}
-                <Text fontSize="xl" fontWeight="bold" color="#FEDF56">
-                    OREKA
-                </Text>
+                {/* Left group: Logo + Search */}
+                <HStack spacing={6}>
+                    <Text
+                        fontSize="5xl"
+                        fontWeight="bold"
+                        bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
+                        bgClip="text"
+                        letterSpacing="wider"
+                        textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
+                        fontFamily="'Orbitron', sans-serif"
+                    >
+                        OREKA
+                    </Text>
 
-                <Spacer />
-                {/* Wallet information display */}
-                {identityPrincipal ? (
-                    <HStack spacing={4}>
-                        {/* ICP balance display */}
-                        <HStack
-                            p={2}
-                            bg="gray.900"
-                            borderRadius="md"
-                            borderWidth="1px"
-                            borderColor="gray.700"
-                        >
-                            <Icon as={GoInfinity} color="#29ABE2" />
-                            <Text color="white" fontWeight="medium">
-                                {balance} ICP
-                            </Text>
-                        </HStack>
-                        {/* Principal ID (shortened) */}
+                    {/* Search input */}
+                    <Box position="relative" maxW="600px" w="100%" height="50px" display="flex" alignItems="center">
+                        <InputGroup ml="50px" w="500px" height="50px">
+                            <Input
+                                placeholder="Search OREKA"
+                                value={searchQuery}
+                                onChange={(e) => {
+                                    const value = e.target.value;
+                                    setSearchQuery(value);
+                                    if (value.trim() === '') {
+                                        setSearchResults([]);
+                                    } else {
+                                        const results = filterContractsByQuery(value);
+                                        setSearchResults(results);
+                                    }
+                                }}
+                                bg="#1A1C21"
+                                color="white"
+                                borderColor="gray.600"
+                                borderRadius="3xl"
+                                fontSize="md"
+                                py={6}
+                                px={4}
+                                boxShadow="0 4px 10px rgba(0, 0, 0, 0.2)"
+                                _placeholder={{ color: 'gray.400' }}
+                                _focus={{ borderColor: 'yellow.400', boxShadow: '0 0 0 2px rgba(254, 223, 86, 0.6)' }}
+                                _hover={{ borderColor: 'yellow.300' }}
+                            />
+                            <InputRightElement pointerEvents="none" height="90%" pr={4} mr="5px" mt="1px" mb="1px"
+                                children={<Icon as={FaSearch} color="gray.400" />}
+                                bg="#1A1C21"
+                                borderColor="gray.600"
+                                borderRadius="3xl"
+                            />
+                        </InputGroup>
+
+                        {/* Search results */}
+                        {searchResults.length > 0 && (
+                            <Box
+                                position="absolute"
+                                top="60px"
+                                left="0"
+                                width="100%"
+                                bg="gray.900"
+                                borderRadius="lg"
+                                boxShadow="xl"
+                                zIndex="dropdown"
+                                maxHeight="300px"
+                                overflowY="auto"
+                                border="1px solid"
+                                borderColor="gray.700"
+                            >
+                                {searchResults.slice(0, 6).map((contract) => {
+                                    const tradingPair = contract.tradingPair || "";
+                                    const address = contract.address;
+                                    const baseToken = tradingPair.split('/')[0]?.toLowerCase();
+                                    const imageIndex = contractImageIndices?.[address] || 1;
+                                    const imageSrc = `/images/${baseToken}/${baseToken}${imageIndex}.png`;
+
+                                    return (
+                                        <Box
+                                            key={address}
+                                            display="flex"
+                                            alignItems="center"
+                                            px={4}
+                                            py={3}
+                                            _hover={{ bg: "gray.700", cursor: "pointer" }}
+                                            onClick={() => {
+                                                handleContractClick(contract.address);
+                                                setSearchQuery('');
+                                                setSearchResults([]);
+                                            }}
+                                        >
+                                            <Image
+                                                src={imageSrc}
+                                                alt="token"
+                                                boxSize="32px"
+                                                borderRadius="full"
+                                                mr={4}
+                                                fallbackSrc="/images/default-token.png"
+                                            />
+                                            <Text fontSize="sm" fontWeight="medium" color="white">
+                                                {cleanupMarketTitle(getMarketTitle(contract))}
+                                            </Text>
+                                        </Box>
+                                    );
+                                })}
+                            </Box>
+                        )}
+                    </Box>
+                </HStack>
+
+                {/* Right group: Wallet info */}
+                <HStack spacing={4}>
+                    <Box
+                        mr="10px"
+                        bg="#1A1C21"
+                        borderRadius="3xl"
+                        border="1px solid transparent"
+                        backgroundImage="linear-gradient(to right, #00B894, #00A8FF)"
+                        boxShadow="0 4px 10px rgba(0, 0, 0, 0.3)"
+                    >
                         <Button
-                            leftIcon={<FaWallet />}
-                            bgGradient="linear(to-r, #2575fc, #6a11cb)"
                             variant="solid"
-                            size="md"
                             color="white"
+                            bg="#1A1C21"
+                            borderRadius="3xl"
+                            onClick={() => router.push('/factory')}
+                            _hover={{
+                                bg: 'rgba(0, 183, 148, 0.8)',
+                                color: 'white',
+                                transform: 'scale(1.05)',
+                            }}
+                            _active={{
+                                transform: 'scale(0.95)',
+                            }}
                         >
-                            {shortenAddress(identityPrincipal)}
+                            Deploy Markets
                         </Button>
+                    </Box>
+                    <HStack
+                        p={2}
+                        bg="#1A1C21"
+                        borderRadius="md"
+                        borderWidth="1px"
+                        borderColor="gray.700"
+                    >
+                        <Icon as={GoInfinity} color="#FEDF56" />
+                        <Text color="#FEDF56" fontWeight="medium">
+                            {parseFloat(balance).toFixed(4)} ICP
+                        </Text>
                     </HStack>
-                ) : (
                     <Button
                         leftIcon={<FaWallet />}
-                        bgGradient="linear(to-r, #2575fc, #6a11cb)"
+                        colorScheme="yellow"
+                        variant="outline"
                         size="md"
-                        onClick={initIdentity}
-                        color="white"
                     >
-                        Connect Wallet
+                        {shortenAddress(identityPrincipal)}
                     </Button>
-                )}
+                </HStack>
             </Flex>
 
             <Box p={6}>
@@ -628,75 +761,94 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                                     {/* Info section */}
                                     <Box p={3}>
                                         {/* Market title */}
-                                        <Text fontWeight="bold" mb={1} color="white" fontSize="xl">
+                                        <Text fontWeight="bold" mb={3} color="white" fontSize="xl">
                                             {cleanupMarketTitle(getMarketTitle(contract))}
                                         </Text>
 
-                                        {/* LONG/SHORT ratio */}
-                                        <Flex
-                                            align="center"
-                                            w="100%"
-                                            h="25px"
-                                            borderRadius="full"
-                                            bg="gray.800"
-                                            border="1px solid"
-                                            borderColor="gray.600"
-                                            position="relative"
-                                            overflow="hidden"
-                                            boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
-                                            mb={4}
-                                        >
-                                            {/* LONG Section */}
+                                        {/* LONG/SHORT ratio or Result display */}
+                                        {(contract.phase === Phase.Maturity || contract.phase === Phase.Expiry) ? (
                                             <Box
-                                                width={`${contractPercentages[contract.address]?.long}%`}
-                                                bgGradient="linear(to-r, #0f0c29, #00ff87)"
-                                                transition="width 0.6s ease"
-                                                h="full"
-                                                display="flex"
+                                                w="100%"
+                                                py={2}
                                                 alignItems="center"
-                                                justifyContent="flex-end"
-                                                pr={3}
-                                                position="relative"
-                                                zIndex={1}
+                                                borderRadius="md"
+                                                bg={determineMarketResult(parseFloat(contract.longAmount), parseFloat(contract.shortAmount)) === 'LONG' ? "#1B3B3F" : "#3D243A"}
+                                                border="1px solid"
+                                                borderColor="gray.600"
+                                                textAlign="center"
+                                                mb={4}
                                             >
-                                                {contractPercentages[contract.address]?.long > 8 && (
-                                                    <Text
-                                                        fontSize="sm"
-                                                        fontWeight="bold"
-                                                        color="whiteAlpha.800"
-                                                    >
-                                                        {contractPercentages[contract.address]?.long.toFixed(0)}%
-                                                    </Text>
-                                                )}
+                                                <Text
+                                                    fontSize="md"
+                                                    fontWeight="bold"
+                                                    color={determineMarketResult(parseFloat(contract.longAmount), parseFloat(contract.shortAmount)) === 'LONG' ? "#20BCBB" : "#FF6492"}
+                                                >
+                                                    {determineMarketResult(parseFloat(contract.longAmount), parseFloat(contract.shortAmount))}
+                                                </Text>
                                             </Box>
-
-                                            {/* SHORT Section (in absolute layer for smooth overlap) */}
-                                            <Box
-                                                position="absolute"
-                                                right="0"
-                                                top="0"
-                                                h="100%"
-                                                width={`${contractPercentages[contract.address]?.short}%`}
-                                                bgGradient="linear(to-r, #ff512f, #dd2476)"
-                                                transition="width 0.6s ease"
-                                                display="flex"
-                                                alignItems="center"
-                                                justifyContent="flex-start"
-                                                pl={3}
-                                                zIndex={0}
+                                        ) : (
+                                            <Flex
+                                                align="center"
+                                                w="100%"
+                                                h="25px"
+                                                borderRadius="full"
+                                                overflow="hidden"
+                                                border="1px solid"
+                                                borderColor="gray.600"
+                                                bg="gray.800"
+                                                boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
+                                                mb={4}
                                             >
-                                                {contractPercentages[contract.address]?.short > 8 && (
-                                                    <Text
-                                                        fontSize="sm"
-                                                        fontWeight="bold"
-                                                        color="whiteAlpha.800"
-                                                    >
-                                                        {contractPercentages[contract.address]?.short.toFixed(0)}%
-                                                    </Text>
-                                                )}
-                                            </Box>
-                                        </Flex>
+                                                {/* LONG Section */}
+                                                <Box
+                                                    h="100%"
+                                                    w={`${contractPercentages[contract.address]?.long}%`}
+                                                    bgGradient="linear(to-r, #00ea00, #56ff56, #efef8b)"
+                                                    transition="width 0.6s ease"
+                                                    display="flex"
+                                                    alignItems="center"
+                                                    justifyContent="flex-end"
+                                                    pr={3}
+                                                    position="relative"
+                                                    zIndex={1}
+                                                >
+                                                    {contractPercentages[contract.address]?.long > 8 && (
+                                                        <Text
+                                                            fontSize="sm"
+                                                            fontWeight="bold"
+                                                            color="blackAlpha.800"
+                                                        >
+                                                            {contractPercentages[contract.address]?.long.toFixed(0)}%
+                                                        </Text>
+                                                    )}
+                                                </Box>
 
+                                                {/* SHORT Section */}
+                                                <Box
+                                                    h="100%"
+                                                    w={`${contractPercentages[contract.address]?.short}%`}
+                                                    bgGradient="linear(to-r, #FF6B81, #D5006D)"
+                                                    transition="width 0.6s ease"
+                                                    display="flex"
+                                                    alignItems="center"
+                                                    justifyContent="flex-start"
+                                                    pl={3}
+                                                    zIndex={0}
+                                                >
+                                                    {contractPercentages[contract.address]?.short > 8 && (
+                                                        <Text
+                                                            fontSize="sm"
+                                                            fontWeight="bold"
+                                                            color="whiteAlpha.800"
+                                                        >
+                                                            {contractPercentages[contract.address]?.short.toFixed(0)}%
+                                                        </Text>
+                                                    )}
+                                                </Box>
+                                            </Flex>
+                                        )}
+
+                                        {/* LONG/SHORT buttons */}
                                         <Flex justify="space-between" align="center" mb={2}>
                                             <Box>
                                                 <Button fontSize="sm"
@@ -747,6 +899,7 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                                                 <Icon
                                                     as={getTradingPairIcon(contract.tradingPair)}
                                                     color="blue.300"
+                                                    boxSize={6}
                                                 />
                                                 <Text fontWeight="bold" fontSize="lg" color="white">
                                                     {contract.currentPrice

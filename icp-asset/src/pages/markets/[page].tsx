@@ -41,8 +41,12 @@ export default function MarketsPage() {
     async function login() {
         const authClient = await AuthClient.create();
 
+        const isProduction = process.env.NODE_ENV === 'production';
+
         authClient.login({
-            identityProvider: process.env.NEXT_PUBLIC_II_URL,
+            identityProvider: isProduction
+                ? process.env.NEXT_PUBLIC_II_URL || "https://identity.ic0.app"
+                : `http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943`,
             onSuccess: async () => {
                 const identity = authClient.getIdentity();
                 const principal = identity.getPrincipal().toString();
