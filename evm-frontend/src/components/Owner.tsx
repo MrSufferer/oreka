@@ -239,6 +239,7 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
   }, [isConnected, refreshBalance]);
 
   // Fetch wallet balance
+  // Fetch wallet balance
   const fetchBalance = async () => {
     if (!walletAddress) return; // Exit if no wallet address
     try {
