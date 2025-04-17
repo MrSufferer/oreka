@@ -3,7 +3,7 @@ import { useCallback } from 'react'; // Thêm import useCallback
 import {
     Flex, Box, Text, Button, VStack, useToast, Input,
     Select, HStack, Icon, ScaleFade, Table, Thead, Tbody, Tr, Th, Td, TableContainer,
-    Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Divider
+    Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Divider, Circle, Spacer
 } from '@chakra-ui/react';
 import { FaEthereum, FaWallet, FaTrophy, FaRegClock, FaArrowUp, FaArrowDown, FaCoins } from 'react-icons/fa';
 import { GoInfinity } from "react-icons/go";
@@ -90,6 +90,8 @@ function Customer({ contractAddress }: CustomerProps) {
     const [shouldCheckRewardClaimability, setShouldCheckRewardClaimability] = useState(false);
     const [identityPrincipal, setIdentityPrincipal] = useState("");
     const [marketId, setMarketId] = useState<string | null>(null);
+    // Add state to track if user is admin
+    const [isAdmin, setIsAdmin] = useState(false);
 
     // Add a state to track if we need to show the market selection view
     const [showMarketSelection, setShowMarketSelection] = useState(false);
@@ -264,6 +266,12 @@ function Customer({ contractAddress }: CustomerProps) {
             const marketDetails = await marketService.getMarketDetails();
             console.log("FETCH DETAILS: Market details:", marketDetails);
 
+            // Check if user is market owner/admin
+            if (marketDetails && marketDetails.owner && identityPrincipal) {
+                const isOwner = marketDetails.owner.toText() === identityPrincipal;
+                setIsAdmin(isOwner);
+                console.log("FETCH DETAILS: User is admin:", isOwner);
+            }
 
             const strikePrice = marketDetails.oracleDetails.strikePrice;
             const finalPrice = marketDetails.oracleDetails.finalPrice;
@@ -836,6 +844,25 @@ function Customer({ contractAddress }: CustomerProps) {
         }
     };
 
+    // Add function to check if current user is admin
+    const checkIsAdmin = async () => {
+        try {
+            if (!marketService || !identityPrincipal) return false;
+
+            const marketDetails = await marketService.getMarketDetails();
+            if (marketDetails && marketDetails.owner) {
+                // Check if current user is the market owner
+                const isOwner = marketDetails.owner.toText() === identityPrincipal;
+                setIsAdmin(isOwner);
+                return isOwner;
+            }
+            return false;
+        } catch (error) {
+            console.error("Error checking admin status:", error);
+            return false;
+        }
+    };
+
     return (
         <Flex direction="column" alignItems="center" justifyContent="flex-start" p={6} bg="black" minH="100vh" position="relative">
             {showMarketSelection ? (
@@ -1203,6 +1230,165 @@ function Customer({ contractAddress }: CustomerProps) {
                                 >
                                     Make your first Prediction Market
                                 </Button>
+                            </Box>
+
+                            {/* Market Timeline */}
+                            <Box
+                                bg="gray.800"
+                                p={4}
+                                borderRadius="xl"
+                                borderWidth={1}
+                                borderColor="gray.700"
+                                position="relative"
+                                mb={4}
+                            >
+                                <Text fontSize="md" fontWeight="bold" color="white" mb={4} textAlign="center">
+                                    Market is Live
+                                </Text>
+
+                                <Box
+                                    bg="#1A202C"
+                                    p={4}
+                                    borderRadius="xl"
+                                    borderWidth={1}
+                                    borderColor="gray.700"
+                                >
+                                    <VStack align="stretch" spacing={3} position="relative">
+                                        {/* Vertical Line */}
+                                        <Box
+                                            position="absolute"
+                                            left="16px"
+                                            top="30px"
+                                            bottom="20px"
+                                            width="2px"
+                                            bg="gray.700"
+                                            zIndex={0}
+                                        />
+
+                                        {/* Trading Phase */}
+                                        <HStack spacing={4}>
+                                            <Circle size="35px" bg={currentPhase === Phase.Trading ? "green.400" : "gray.700"} color="white">1</Circle>
+                                            <VStack align="start" spacing={0} fontWeight="bold">
+                                                <Text fontSize="md" color={currentPhase === Phase.Trading ? "green.400" : "gray.500"}>
+                                                    Trading
+                                                </Text>
+                                                <Text fontSize="xs" color="gray.500">
+                                                    {endTimestamp ? new Date((Number(endTimestamp) - 86400) * 1000).toLocaleString() : 'Pending'}
+                                                </Text>
+                                            </VStack>
+                                            <Spacer />
+                                            {currentPhase === Phase.Trading && isAdmin && (
+                                                <Button
+                                                    onClick={async () => {
+                                                        try {
+                                                            if (marketService) {
+                                                                await marketService.startTrading();
+                                                                await fetchMarketDetails();
+                                                            }
+                                                        } catch (error) {
+                                                            console.error("Error starting bidding:", error);
+                                                        }
+                                                    }}
+                                                    size="sm"
+                                                    colorScheme="yellow"
+                                                    bg="#FEDF56"
+                                                    color="black"
+                                                    _hover={{ bg: "#FFE56B" }}
+                                                    width="35%"
+                                                >
+                                                    Start Bidding
+                                                </Button>
+                                            )}
+                                        </HStack>
+
+                                        {/* Bidding Phase */}
+                                        <HStack spacing={4}>
+                                            <Circle size="35px" bg={currentPhase === Phase.Bidding ? "blue.400" : "gray.700"} color="white">2</Circle>
+                                            <VStack align="start" spacing={0} fontWeight="bold">
+                                                <Text fontSize="md" color={currentPhase === Phase.Bidding ? "blue.400" : "gray.500"}>
+                                                    Bidding
+                                                </Text>
+                                                <Text fontSize="xs" color="gray.500">
+                                                    {endTimestamp ? new Date((Number(endTimestamp) - 43200) * 1000).toLocaleString() : 'Waiting'}
+                                                </Text>
+                                            </VStack>
+                                            <Spacer />
+                                            {currentPhase === Phase.Bidding && isAdmin && (
+                                                <Button
+                                                    onClick={async () => {
+                                                        try {
+                                                            if (marketService) {
+                                                                await marketService.resolveMarket();
+                                                                await fetchMarketDetails();
+                                                            }
+                                                        } catch (error) {
+                                                            console.error("Error resolving market:", error);
+                                                        }
+                                                    }}
+                                                    size="sm"
+                                                    colorScheme="yellow"
+                                                    bg="#FEDF56"
+                                                    color="black"
+                                                    _hover={{ bg: "#FFE56B" }}
+                                                    width="35%"
+                                                >
+                                                    Resolve
+                                                </Button>
+                                            )}
+                                        </HStack>
+
+                                        {/* Maturity Phase */}
+                                        <HStack spacing={4} justify="space-between">
+                                            <HStack spacing={4}>
+                                                <Circle size="35px" bg={currentPhase === Phase.Maturity ? "orange.400" : "gray.700"} color="white">3</Circle>
+                                                <VStack align="start" spacing={0} fontWeight="bold">
+                                                    <Text fontSize="md" color={currentPhase === Phase.Maturity ? "orange.400" : "gray.500"}>
+                                                        Maturity
+                                                    </Text>
+                                                    <Text fontSize="xs" color="gray.500">
+                                                        {endTimestamp ? new Date(Number(endTimestamp) * 1000).toLocaleString() : 'Pending'}
+                                                    </Text>
+                                                </VStack>
+                                            </HStack>
+                                            <Spacer />
+                                            {currentPhase === Phase.Maturity && finalPrice && isAdmin && (
+                                                <Button
+                                                    onClick={async () => {
+                                                        try {
+                                                            if (marketService) {
+                                                                await marketService.expireMarket();
+                                                                await fetchMarketDetails();
+                                                            }
+                                                        } catch (error) {
+                                                            console.error("Error expiring market:", error);
+                                                        }
+                                                    }}
+                                                    size="sm"
+                                                    colorScheme="yellow"
+                                                    bg="#FEDF56"
+                                                    color="black"
+                                                    _hover={{ bg: "#FFE56B" }}
+                                                    width="35%"
+                                                >
+                                                    Expire
+                                                </Button>
+                                            )}
+                                        </HStack>
+
+                                        {/* Expiry Phase */}
+                                        <HStack spacing={4}>
+                                            <Circle size="35px" bg={currentPhase === Phase.Expiry ? "red.400" : "gray.700"} color="white">4</Circle>
+                                            <VStack align="start" spacing={0} fontWeight="bold">
+                                                <Text fontSize="md" color={currentPhase === Phase.Expiry ? "red.400" : "gray.500"}>
+                                                    Expiry
+                                                </Text>
+                                                <Text fontSize="xs" color="gray.500">
+                                                    {endTimestamp ? new Date((Number(endTimestamp) + 3600) * 1000).toLocaleString() : 'Pending'}
+                                                </Text>
+                                            </VStack>
+                                        </HStack>
+                                    </VStack>
+                                </Box>
                             </Box>
                         </Box>
                     </Flex>
