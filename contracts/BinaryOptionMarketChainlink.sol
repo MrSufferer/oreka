@@ -85,8 +85,7 @@ contract BinaryOptionMarket is Ownable {
         uint totalDeposited
     );
 
-    // The problem may lie in the oracle. It should be deployed on Sepolia
-    // FUCK!
+    
     constructor(
         int _strikePrice,
         address _owner,
@@ -141,7 +140,7 @@ contract BinaryOptionMarket is Ownable {
 
     event MarketOutcome(Side winningSide, address indexed user, bool isWinner);
 
-    function resolveMarket() external onlyOwner {
+    function resolveMarket() external {
         require(currentPhase == Phase.Bidding, "Market not in bidding phase");
         require(block.timestamp >= maturityTime, "Too early to resolve");
 
@@ -224,7 +223,7 @@ contract BinaryOptionMarket is Ownable {
         require(userDeposit > 0, "No deposits on winning side");
 
         uint reward = (userDeposit * totalDeposited) / totalWinningDeposits;
-        uint fee = (reward * feePercentage) / 100;
+        uint fee = (reward * feePercentage) / 1000;
         uint finalReward = reward - fee;
 
         hasClaimed[msg.sender] = true;
@@ -233,24 +232,16 @@ contract BinaryOptionMarket is Ownable {
         emit RewardClaimed(msg.sender, finalReward);
     }
 
-    function withdraw() public onlyOwner {
-        uint amount = address(this).balance;
-        require(amount > 0, "No balance to withdraw.");
+    function withdraw() external onlyOwner {
+    uint feeAmount = (totalDeposited * feePercentage) / 1000; 
 
-        payable(msg.sender).transfer(amount);
+    require(feeAmount > 0, "No fee to withdraw.");
+    require(address(this).balance >= feeAmount, "Insufficient contract balance.");
 
-        emit Withdrawal(msg.sender, amount);
-    }
+    payable(msg.sender).transfer(feeAmount);
 
-    // question how should we call this frequently?
-    // answer we're going to call it from the resolveMarket - NAIVE method
-    // function requestPriceFeed() internal {
-    //     // Requesting the ICP/USD price feed with a specified callback gas limit
-    //     uint256 requestId = apolloCoordinator.requestDataFeed(
-    //         "ICP/USD",
-    //         300000
-    //     );
-    // }
+    emit Withdrawal(msg.sender, feeAmount);
+}
 
     function startBidding() external onlyOwner {
         require(currentPhase == Phase.Trading, "Market not in trading phase");

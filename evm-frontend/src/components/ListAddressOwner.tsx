@@ -24,9 +24,13 @@ import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketChainlinkABI
 import { useAuth } from '../context/AuthContext';
 import { PriceService } from '../services/PriceService';
 import { format, formatDistanceToNow } from 'date-fns';
-import { getCurrentTimestamp, isTimestampPassed, getTimeRemaining } from '../utils/timeUtils';
+import { getCurrentTimestamp, isTimestampPassed, getTimeRemaining, formatTimeToLocal } from '../utils/timeUtils';
 import { GrDeploy } from 'react-icons/gr';
 import { determineMarketResult } from '../utils/market';
+import { getChartSymbolFromTradingPair } from '../utils/priceFeeds';
+import { TbDropletHalf2Filled } from "react-icons/tb";
+import { SiExpertsexchange } from "react-icons/si";
+
 
 // ListAddressOwnerProps interface
 interface ListAddressOwnerProps {
@@ -84,6 +88,85 @@ const getPhaseName = (phase: number) => {
   }
 };
 
+/**
+ * Format strike price properly based on token type and size
+ * Safely handles BigNumber conversion and applies proper decimal formatting
+ * 
+ * @param {string|BigNumber} strikePrice - Raw strike price from contract
+ * @param {string} tradingPair - Trading pair (e.g. "BTC/USD")
+ * @returns {string} Formatted strike price for display
+ */
+const formatStrikePrice = (strikePrice: string | any, tradingPair: string): string => {
+  // First convert to BigNumber safely if it isn't already
+  let strikePriceBN;
+  try {
+    // Check if it's already a BigNumber
+    if (strikePrice.toString && typeof strikePrice.toString === 'function' &&
+      strikePrice._isBigNumber) {
+      strikePriceBN = strikePrice;
+    } else {
+      strikePriceBN = ethers.BigNumber.from(strikePrice.toString());
+    }
+  } catch (e) {
+    // Fallback to string parsing for very large numbers
+    console.warn("Error converting strike price to BigNumber, using string parsing", e);
+
+    // For very large numbers, use string operations instead
+    const priceStr = strikePrice.toString();
+
+    // Handle numbers that might be scientific notation
+    if (priceStr.includes('e')) {
+      return parseFloat(priceStr).toFixed(4);
+    }
+
+    // Manual decimal conversion (divide by 10^8)
+    if (priceStr.length > 8) {
+      const integerPart = priceStr.slice(0, priceStr.length - 8);
+      const decimalPart = priceStr.slice(priceStr.length - 8);
+      return `${integerPart}.${decimalPart}`;
+    }
+
+    // Small numbers
+    return (parseInt(priceStr) / 10 ** 8).toFixed(8);
+  }
+
+  // Convert to decimal with proper scaling
+  let decimalValue;
+  try {
+    // The BigNumber division approach for more precision
+    const divisor = ethers.BigNumber.from(10).pow(8);
+    const wholePart = strikePriceBN.div(divisor);
+    const fractionalPart = strikePriceBN.mod(divisor);
+
+    // Format fractional part to ensure leading zeros
+    let fractionalStr = fractionalPart.toString().padStart(8, '0');
+    // Trim trailing zeros for cleaner display
+    fractionalStr = fractionalStr.replace(/0+$/, '');
+
+    // If no fractional part, just return the whole part
+    if (fractionalStr === '') {
+      decimalValue = wholePart.toString();
+    } else {
+      decimalValue = `${wholePart.toString()}.${fractionalStr}`;
+    }
+  } catch (e) {
+    console.warn("Error in BigNumber division, using basic division", e);
+    decimalValue = (parseFloat(strikePriceBN.toString()) / 10 ** 8).toString();
+  }
+
+  // Format according to trading pair
+  if (tradingPair.includes('BTC') || tradingPair.includes('ETH')) {
+    return parseFloat(decimalValue).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  } else {
+    return parseFloat(decimalValue).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4
+    });
+  }
+};
 
 // Function to get market title text
 const getMarketTitleText = (contract: any): string => {
@@ -95,28 +178,12 @@ const getMarketTitleText = (contract: any): string => {
     const date = new Date(timestamp * 1000);
     const maturityTimeFormatted = format(date, 'MMM d, yyyy h:mm a');
 
-    let strikePriceInteger;
-    try {
-      strikePriceInteger = ethers.BigNumber.from(contract.strikePrice);
-    } catch (e) {
-      strikePriceInteger = parseInt(contract.strikePrice);
-    }
-
-    let strikePriceFormatted;
-    if (pair.includes('BTC') || pair.includes('ETH')) {
-      strikePriceFormatted = (strikePriceInteger / 10 ** 8).toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-    } else {
-      strikePriceFormatted = (strikePriceInteger / 10 ** 8).toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 4
-      });
-    }
+    // Use the new formatStrikePrice function
+    const strikePriceFormatted = formatStrikePrice(contract.strikePrice, contract.tradingPair);
 
     return `${pair} will reach $${strikePriceFormatted} by ${maturityTimeFormatted}?`;
   } catch (error) {
+    console.error("Error formatting market title:", error);
     return 'Unknown Market';
   }
 };
@@ -170,7 +237,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
   // Pagination configuration
   const currentPage = page;
-  const contractsPerPage = 32;
+  const contractsPerPage = 12;
   const [currentContracts, setCurrentContracts] = useState<ContractData[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -186,63 +253,77 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   // One week ago timestamp
   const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
+  // Trading pair filter
+  const [currentTradingPairFilter, setCurrentTradingPairFilter] = useState<string | null>(null);
+
+  // User holdings contracts
+  const [userHoldingsContracts, setUserHoldingsContracts] = useState<string[]>([]);
+
+
   /**
    * Filters contracts based on the currently selected tab
    * Different tabs show different subsets of markets (All, Recent, Active, Expired, By Asset)
    */
   const filteredContracts = currentContracts
-  .filter(contract => {
-    const contractTimestamp = contract.createDate
-      ? new Date(contract.createDate).getTime()
-      : Number(contract.maturityTime) * 1000;
+    .filter(contract => {
+      const contractTimestamp = contract.createDate
+        ? new Date(contract.createDate).getTime()
+        : Number(contract.maturityTime) * 1000;
 
-    const now = Date.now();
-
-    switch (currentTab) {
-      case 'All Markets':
-        return true;
-
-      case 'Most recent':
-        return (
-          contractTimestamp >= oneWeekAgo 
-          //  && Number(contract.phase) !== Phase.Maturity &&
-          // Number(contract.phase) !== Phase.Expiry
-        );
-
-      case 'Quests':
-        return Number(contract.phase) === Phase.Trading || Number(contract.phase) === Phase.Bidding;
-
-      case 'Results':
-        return Number(contract.phase) === Phase.Maturity || Number(contract.phase) === Phase.Expiry;
-
-      default:
-        return contract.tradingPair === currentTab;
-    }
-  })
-  .sort((a, b) => {
-    if (currentTab === 'All Markets') {
       const now = Date.now();
-      const aMaturity = Number(a.maturityTime) * 1000;
-      const bMaturity = Number(b.maturityTime) * 1000;
 
-      const aHasExpired = now > aMaturity;
-      const bHasExpired = now > bMaturity;
+      switch (currentTab) {
+        case 'All Markets':
+          return true;
 
-      // If both are not expired, sort by maturity time
-      if (!aHasExpired && !bHasExpired) {
-        return aMaturity - bMaturity;
+        case 'Most recent':
+          return (
+            contractTimestamp >= oneWeekAgo
+            //  && Number(contract.phase) !== Phase.Maturity &&
+            // Number(contract.phase) !== Phase.Expiry
+          );
+
+        case 'Quests':
+          return Number(contract.phase) === Phase.Trading || Number(contract.phase) === Phase.Bidding;
+
+        case 'Results':
+          return Number(contract.phase) === Phase.Maturity || Number(contract.phase) === Phase.Expiry;
+
+        case 'Pair':
+          return currentTradingPairFilter ? contract.tradingPair === currentTradingPairFilter : true;
+        case 'My Markets':
+          return contract.owner.toLowerCase() === walletAddress?.toLowerCase();
+
+        case 'My Holdings':
+          return userHoldingsContracts.includes(contract.address.toLowerCase());
+        default:
+          return true;
+      }
+    })
+    .sort((a, b) => {
+      if (currentTab === 'All Markets') {
+        const now = Date.now();
+        const aMaturity = Number(a.maturityTime) * 1000;
+        const bMaturity = Number(b.maturityTime) * 1000;
+
+        const aHasExpired = now > aMaturity;
+        const bHasExpired = now > bMaturity;
+
+        // If both are not expired, sort by maturity time
+        if (!aHasExpired && !bHasExpired) {
+          return aMaturity - bMaturity;
+        }
+
+        // If only a has expired, prioritize b
+        if (aHasExpired && !bHasExpired) return 1;
+        if (!aHasExpired && bHasExpired) return -1;
+
+        // If both have expired, keep the order
+        return 0;
       }
 
-      // If only a has expired, prioritize b
-      if (aHasExpired && !bHasExpired) return 1;
-      if (!aHasExpired && bHasExpired) return -1;
-
-      // If both have expired, keep the order
       return 0;
-    }
-
-    return 0;
-  });
+    });
 
   /**
      * Sorts contracts by creation date when "Most recent" tab is selected
@@ -264,9 +345,15 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
  * Slices the full contracts array to show only the current page's worth of contracts
  */
   useEffect(() => {
+    // Sort deployedContracts first to show newest contracts first
+    const sortedContracts = [...deployedContracts].sort((a, b) => {
+      // Use deployment time for sorting - newer contracts first
+      return new Date(b.createDate).getTime() - new Date(a.createDate).getTime();
+    });
+
     const indexOfLastContract = page * contractsPerPage;
     const indexOfFirstContract = indexOfLastContract - contractsPerPage;
-    const newCurrentContracts = deployedContracts.slice(indexOfFirstContract, indexOfLastContract);
+    const newCurrentContracts = sortedContracts.slice(indexOfFirstContract, indexOfLastContract);
     setCurrentContracts(newCurrentContracts);
   }, [deployedContracts, page]);
 
@@ -278,9 +365,26 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     fetchDeployedContracts();
   }, [ownerAddress, page]);
 
+  useEffect(() => {
+    const cached = sessionStorage.getItem('cachedDeployedContracts');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        setDeployedContracts(parsed);
+        setLoading(false);
+        sessionStorage.removeItem('cachedDeployedContracts');
+      } catch (err) {
+        console.error("Error parsing cached deployed contracts:", err);
+        fetchDeployedContracts();
+      }
+    } else {
+      fetchDeployedContracts();
+    }
+  }, []);
+
   /**
    * Fetches all deployed contracts from the blockchain
-   * Retrieves contracts from known owners and falls back to event logs if needed
+   * Retrieves contracts from factory events to show all deployed contracts
    */
   const fetchDeployedContracts = async () => {
     try {
@@ -296,16 +400,35 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
       const factoryContract = new ethers.Contract(factoryAddress, Factory.abi, provider);
 
-      console.log("Fetching all contracts from all known owners");
+      console.log("Fetching all deployed contracts from blockchain events");
 
-      // List of known wallet addresses to check for contracts
-      // Can be expanded with additional addresses as the platform grows
+      // Initialize contracts array
+      let allContracts: string[] = [];
+
+      // CHANGED: Always fetch contracts from events first to get ALL deployed contracts
+      try {
+        console.log("Fetching all contracts from deployment events");
+        const filter = factoryContract.filters.Deployed();
+        const events = await factoryContract.queryFilter(filter);
+
+        console.log("Found events:", events.length);
+
+        // Extract contract addresses from deployment events
+        events.forEach(event => {
+          const contractAddress = event.args?.contractAddress;
+          if (contractAddress && !allContracts.includes(contractAddress)) {
+            allContracts.push(contractAddress);
+          }
+        });
+
+        console.log("Contracts from events:", allContracts);
+      } catch (error) {
+        console.error("Error fetching from events:", error);
+      }
+
+      // Optionally supplement with owner-specific contracts if we missed any
       const knownOwners = [
-        // "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", // Default Hardhat account #0
-        // "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", // Default Hardhat account #1
-        // "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", // Default Hardhat account #2
-
-        // Additional known addresses can be added here
+        // No need to include hardcoded addresses as we already got all contracts from events
       ];
 
       // Add current user's address and requested owner address to the lookup list
@@ -316,16 +439,14 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         knownOwners.push(ownerAddress);
       }
 
-      console.log("Known owners:", knownOwners);
+      console.log("Additional known owners:", knownOwners);
 
-      // Retrieve all contracts from all known owner addresses
-      let allContracts: string[] = [];
-
+      // Check for any additional contracts that might not have appeared in events
       for (const owner of knownOwners) {
         try {
           if (owner && owner !== "") {
             const ownerContracts = await factoryContract.getContractsByOwner(owner);
-            console.log(`Contracts for owner ${owner}:`, ownerContracts);
+            console.log(`Checking additional contracts for owner ${owner}:`, ownerContracts);
 
             // Add new contracts to the list (avoiding duplicates)
             ownerContracts.forEach((contract: string) => {
@@ -339,30 +460,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         }
       }
 
-      console.log("All contracts:", allContracts);
-
-      // Fallback to event logs if no contracts found through direct lookup
-      if (allContracts.length === 0) {
-        try {
-          console.log("Trying to fetch from event logs");
-          const filter = factoryContract.filters.Deployed();
-          const events = await factoryContract.queryFilter(filter);
-
-          console.log("Found events:", events.length);
-
-          // Extract contract addresses from deployment events
-          events.forEach(event => {
-            const contractAddress = event.args?.contractAddress;
-            if (contractAddress && !allContracts.includes(contractAddress)) {
-              allContracts.push(contractAddress);
-            }
-          });
-
-          console.log("Contracts from events:", allContracts);
-        } catch (error) {
-          console.error("Error fetching from events:", error);
-        }
-      }
+      console.log("Final all contracts list:", allContracts);
 
       // Fetch detailed data for each contract address
       const contractsData = await Promise.all(allContracts.map(async (address: string) => {
@@ -469,9 +567,21 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
   /**
  * Initial contract data loading when owner address changes
+ * Sorts contracts by creation date (newest first)
  */
   useEffect(() => {
-    fetchDeployedContracts();
+    const fetchAndSortContracts = async () => {
+      await fetchDeployedContracts();
+
+      // Sort contracts with newest first after fetching
+      setDeployedContracts(prevContracts => {
+        return [...prevContracts].sort((a, b) => {
+          return new Date(b.createDate).getTime() - new Date(a.createDate).getTime();
+        });
+      });
+    };
+
+    fetchAndSortContracts();
   }, [ownerAddress]);
 
   /**
@@ -483,9 +593,9 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     if (tradingPair.includes("BTC")) return SiBitcoinsv;
     if (tradingPair.includes("ETH")) return FaEthereum;
     if (tradingPair.includes("LINK")) return SiChainlink;
-    if (tradingPair.includes("DAI")) return SiDogecoin;
-    if (tradingPair.includes("USDC")) return IoLogoUsd;
-    return FaDollarSign; // fallback mặc định
+    if (tradingPair.includes("SNX")) return SiExpertsexchange;
+    if (tradingPair.includes("WSTETH")) return TbDropletHalf2Filled;
+    return FaDollarSign;
   };
 
   /**
@@ -523,29 +633,253 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   }, []);
 
   /**
+   * Fetch user holdings contracts
+   */
+  useEffect(() => {
+    if (!walletAddress || !deployedContracts.length) return;
+
+    const fetchUserHoldings = async () => {
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const result: string[] = [];
+
+      for (const contract of deployedContracts) {
+        try {
+          const instance = new ethers.Contract(contract.address, BinaryOptionMarket.abi, provider);
+
+          const [longBid, shortBid] = await Promise.all([
+            instance.longBids(walletAddress),
+            instance.shortBids(walletAddress)
+          ]);
+
+          if (!longBid.isZero() || !shortBid.isZero()) {
+            result.push(contract.address.toLowerCase());
+          }
+        } catch (err) {
+          console.error(`Error checking bids for ${contract.address}`, err);
+        }
+      }
+
+      setUserHoldingsContracts(result);
+    };
+
+    fetchUserHoldings();
+  }, [walletAddress, deployedContracts]);
+
+  /**
  * Handles contract selection and navigation
- * Stores contract data in localStorage and redirects to appropriate view
+ * Prepares comprehensive data for immediate rendering in Customer.tsx and MarketCharts.tsx
  * 
  * @param {string} contractAddress - Address of the selected contract
  * @param {string} owner - Owner address of the contract
- * @param {ContractData} contractData - Full contract data object
+ * @param {ContractData} contractData - Basic contract data object
  */
   const handleAddressClick = (contractAddress: string, owner: string, contractData: ContractData) => {
-    // Store contract address in localStorage for persistence across page navigations
-    localStorage.setItem('selectedContractAddress', contractAddress);
+    try {
+      // First, clear any existing stored contract data to prevent old data persistence
+      localStorage.removeItem('contractData');
+      localStorage.removeItem('selectedContractAddress');
 
-    // Store additional contract data for Customer.tsx to use immediately
-    localStorage.removeItem('contractData');
+      // Convert necessary values to appropriate formats
+      const longAmount = parseFloat(contractData.longAmount || '0');
+      const shortAmount = parseFloat(contractData.shortAmount || '0');
+      const totalAmount = longAmount + shortAmount;
+      const phaseNumber = Number(contractData.phase);
+      const maturityTime = Number(contractData.maturityTime);
 
+      // Determine if user address is the owner of this contract
+      const isOwner = owner.toLowerCase() === walletAddress?.toLowerCase();
 
-    // Always navigate to the customer view for the contract
-    router.push({
-      pathname: `/customer/${contractData.address}`,
-      query: {
-        data: JSON.stringify(contractData), // serialize object
-      },
-    });
+      // Get formatted strike price for immediate display
+      const formattedStrikePrice = formatStrikePrice(contractData.strikePrice, contractData.tradingPair);
 
+      // Format trading pair for chart display
+      const chartSymbol = getChartSymbolFromTradingPair(contractData.tradingPair);
+
+      // Calculate position percentages for visualization
+      const positionPercentages = calculatePositionPercentages(contractData.longAmount, contractData.shortAmount);
+
+      // Parse numeric value for direct use in chart
+      const strikePriceNumber = parseInt(contractData.strikePrice) / 100000000;
+
+      // Calculate bidding start time (for position chart)
+      // Use 24 hours before maturity as default if not available
+      const biddingStartTime = maturityTime - (24 * 60 * 60);
+
+      // Calculate resolve time for maturity phase
+      // In most cases, this will be updated from blockchain on load if needed
+      const resolveTime = 0; // Default value, will be updated from blockchain
+
+      // Create initial position history data point for chart
+      const initialPositionHistory = [
+        {
+          timestamp: biddingStartTime,
+          longPercentage: 50,
+          shortPercentage: 50,
+          isMainPoint: false
+        },
+        {
+          timestamp: Math.floor(Date.now() / 1000),
+          longPercentage: positionPercentages.long,
+          shortPercentage: positionPercentages.short,
+          isCurrentPoint: true,
+          isMainPoint: true
+        }
+      ];
+
+      // Determine market result if in Maturity or Expiry phase
+      const marketResult = (phaseNumber === Phase.Maturity || phaseNumber === Phase.Expiry)
+        ? determineMarketResult(longAmount, shortAmount)
+        : null;
+
+      // Get current price and format for comparison to strike price
+      const currentPrice = assetPrices[contractData.tradingPair] || null;
+      let priceDifference = null;
+      let percentageDifference = null;
+
+      if (currentPrice && strikePriceNumber) {
+        priceDifference = currentPrice - strikePriceNumber;
+        percentageDifference = (priceDifference / strikePriceNumber) * 100;
+      }
+
+      // Prepare simple price chart data if real data not available yet
+      const simplePriceData = [];
+      if (currentPrice) {
+        // Create simple chart data for immediate display
+        const now = Date.now();
+        for (let i = 6; i >= 0; i--) {
+          const dayOffset = i * 24 * 60 * 60 * 1000;
+          simplePriceData.push({
+            time: now - dayOffset,
+            close: currentPrice * (0.98 + Math.random() * 0.04) // Randomize within ±2%
+          });
+        }
+      }
+
+      // Define potential timeRemaining
+      const timeRemaining = countdowns[contractAddress] || getTimeRemaining(maturityTime);
+
+      // Format maturity time for display
+      const maturityTimeFormatted = formatTimeToLocal(maturityTime);
+
+      // Calculate final price if in maturity or expiry phase (placeholder)
+      let finalPrice = null;
+      if (phaseNumber === Phase.Maturity || phaseNumber === Phase.Expiry) {
+        // This is a placeholder, will be updated from blockchain
+        finalPrice = strikePriceNumber.toFixed(4);
+      }
+
+      // Enhance contract data with fields needed by both components
+      const enhancedContractData = {
+        // Base contract data
+        address: contractAddress,
+        owner: owner,
+        isOwner: isOwner,
+        timestamp: Date.now(),
+        completeData: true, // Flag to indicate this data is complete for Customer.tsx
+
+        // Phase and time information
+        phase: phaseNumber,
+        currentPhase: phaseNumber, // Additional field for direct use
+        maturityTime: maturityTime,
+        maturityTimeFormatted: maturityTimeFormatted,
+        timeRemaining: timeRemaining,
+        biddingStartTime: biddingStartTime,
+        resolveTime: resolveTime,
+        deployTime: Math.floor(Date.now() / 1000) - 86400, // Default value, will be updated
+
+        // Price-related information
+        strikePrice: contractData.strikePrice, // Raw value
+        strikePriceNumber: strikePriceNumber, // Numeric value
+        formattedStrikePrice: formattedStrikePrice, // For UI display
+        displayStrikePrice: formattedStrikePrice, // For UI display
+        currentPrice: currentPrice,
+        priceDifference: priceDifference,
+        percentageDifference: percentageDifference,
+        finalPrice: finalPrice, // Will be updated from blockchain if needed
+
+        // Trading pair information
+        tradingPair: contractData.tradingPair,
+        chartSymbol: chartSymbol,
+
+        // Position data
+        positionData: {
+          long: longAmount,
+          short: shortAmount
+        },
+        longAmount: longAmount,
+        shortAmount: shortAmount,
+        totalAmount: totalAmount,
+        positionPercentages: positionPercentages,
+        longPercentage: positionPercentages.long,
+        shortPercentage: positionPercentages.short,
+
+        // User position data (will be updated)
+        userPositions: {
+          long: 0,
+          short: 0
+        },
+        userPosition: null,
+
+        // Chart data for immediate rendering
+        initialPositionHistory: initialPositionHistory,
+        simplePriceData: simplePriceData,
+
+        // Market result
+        marketResult: marketResult,
+
+        // Contract state flags (will be updated)
+        canResolve: phaseNumber === Phase.Bidding && (Date.now() / 1000) >= maturityTime,
+        canExpire: phaseNumber === Phase.Maturity && resolveTime > 0 && (Date.now() / 1000) >= resolveTime + 30,
+
+        // Visual information
+        indexBg: contractImageIndices[contractAddress] ?
+          contractImageIndices[contractAddress].toString() : contractData.indexBg || '1',
+
+        // Additional fields for Customer.tsx
+        totalDeposited: totalAmount.toString(),
+        feePercentage: '5', // Default value, will be updated
+      };
+
+      // Store enhanced contract data in localStorage for components to use
+      localStorage.setItem('contractData', JSON.stringify(enhancedContractData));
+      localStorage.setItem('selectedContractAddress', contractAddress);
+
+      // Navigate to customer view
+      router.push(`/customer/${contractAddress}`);
+    } catch (error) {
+      console.error("Error preparing contract data:", error);
+      // Fallback to original behavior if error occurs
+      localStorage.removeItem('contractData'); // Clear to be safe
+      localStorage.setItem('selectedContractAddress', contractAddress);
+      router.push({
+        pathname: `/customer/${contractAddress}`,
+        query: {
+          data: JSON.stringify(contractData),
+        },
+      });
+    }
+  };
+
+  /**
+ * Calculate position percentages for a contract
+ * @param {string} longAmount - Long position amount
+ * @param {string} shortAmount - Short position amount
+ * @returns Object with long and short percentages
+ */
+  const calculatePositionPercentages = (longAmount: string, shortAmount: string) => {
+    const long = parseFloat(longAmount || '0');
+    const short = parseFloat(shortAmount || '0');
+    const total = long + short;
+
+    if (total > 0) {
+      return {
+        long: (long / total) * 100,
+        short: (short / total) * 100
+      };
+    }
+
+    // Default 50/50 if no amounts
+    return { long: 50, short: 50 };
   };
 
   /**
@@ -832,7 +1166,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                   if (value.trim() === '') {
                     setSearchResults([]);
                   } else {
-                    const results = filterContractsByQuery(value); 
+                    const results = filterContractsByQuery(value);
                     setSearchResults(results);
                   }
                 }}
@@ -876,7 +1210,12 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                   const tradingPair = contract.tradingPair || "";
                   const address = contract.address;
                   const baseToken = tradingPair.split('/')[0]?.toLowerCase();
-                  const imageIndex = contractImageIndices?.[address] || 1;
+
+                  // Ensure we have a valid index even if contractImageIndices is not fully loaded yet
+                  const imageIndex = contractImageIndices?.[address] ||
+                    (contract.indexBg ? parseInt(contract.indexBg) : 1);
+
+                  // Make sure we have a valid path and fallback if the specific image doesn't exist
                   const imageSrc = `/images/${baseToken}/${baseToken}${imageIndex}.png`;
 
                   return (
@@ -895,11 +1234,15 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     >
                       <Image
                         src={imageSrc}
-                        alt="token"
+                        alt={tradingPair}
                         boxSize="32px"
                         borderRadius="full"
                         mr={4}
                         fallbackSrc="/images/default-token.png"
+                        onError={(e) => {
+                          // If image fails to load, try a different index or use default
+                          e.currentTarget.src = `/images/default-token.png`;
+                        }}
                       />
                       <Text fontSize="sm" fontWeight="medium" color="white">
                         {getMarketTitleJSX(contract)}
@@ -943,31 +1286,82 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                 Deploy Markets
               </Button>
             </Box>
-            <HStack
-              p={2}
-              bg="#1A1C21"
+            <Box
+              p="2px"
               borderRadius="md"
-              borderWidth="1px"
-              borderColor="gray.200"
+              bg="transparent"
+              sx={{
+                backgroundImage: "linear-gradient(270deg, #ff0059, #5a73d8, #5858b5 , #77efef, #4a63c8)",
+                backgroundSize: "400% 400%",
+                animation: "gradient-border 8s ease infinite",
+                borderRadius: "8px"
+              }}
             >
-              <Icon as={LiaCoinsSolid} color="#FEDF56" />
-              <Text color="#FEDF56" fontWeight="medium">
-                {parseFloat(balance).toFixed(4)} ETH
-              </Text>
-            </HStack>
-            <Button
-              leftIcon={<FaWallet />}
-              colorScheme="blue"
-              variant="outline"
-              size="md"
+              <HStack
+                p={2}
+                bg="#1A1C21"
+                borderRadius="md"
+                w="full"
+              >
+                <Text color="white" fontWeight="medium">
+                  {parseFloat(balance).toFixed(4)} ETH
+                </Text>
+              </HStack>
+
+              {/* Inject CSS animation */}
+              <style jsx>{`
+                  @keyframes gradient-border {
+                    0% { background-position: 0% 50%; }
+                    50% { background-position: 100% 50%; }
+                    100% { background-position: 0% 50%; }
+                  }
+                `}
+              </style>
+            </Box>
+
+            <Box
+              p="2px"
+              borderRadius="md"
+              sx={{
+                backgroundImage: "linear-gradient(270deg, #eaea72, #f49a24, #e25375, #f2f2bf, #f2f2cd)",
+                backgroundSize: "400% 400%",
+                animation: "gradient-border 6s ease infinite",
+                display: "inline-block",
+                borderRadius: "8px",
+              }}
             >
-              {shortenAddress(walletAddress)}
-            </Button>
+              <Button
+                variant="ghost"
+                size="md"
+                bg="#1A1C21"
+                color="white"
+                borderRadius="md"
+                _hover={{
+                  bg: "transparent",
+                  transform: "scale(1.03)",
+                }}
+                _active={{
+                  bg: "transparent"
+                }}
+              >
+                {shortenAddress(walletAddress)}
+              </Button>
+
+              {/* Inject animation for the border */}
+              <style jsx>{`
+                  @keyframes gradient-border {
+                    0% { background-position: 0% 50%; }
+                    50% { background-position: 100% 50%; }
+                    100% { background-position: 0% 50%; }
+                  }
+                `}
+              </style>
+            </Box>
           </HStack>
         ) : (
           <Button
             leftIcon={<FaWallet />}
-            colorScheme="blue"
+            colorScheme="white"
             size="md"
             onClick={connectWallet}
           >
@@ -998,31 +1392,71 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             }}
           >
             <HStack spacing={4}>
-              {/* List of tabs */}
-              {['All Markets', 'Most recent', 'Quests', 'Results', 'BTC/USD', 'ETH/USD', 'LINK/USD', 'DAI/USD', 'USDC/USD'].map((tab) => (
+              {['All Markets', 'Most recent', 'Quests', 'Results', 'My Markets', 'My Holdings'].map((tab) => (
                 <Button
                   key={tab}
                   size="md"
-                  variant={currentTab === tab ? "solid" : "ghost"}
-                  colorScheme={currentTab === tab ? "blue" : "gray"}
+                  variant="ghost"
                   onClick={() => setCurrentTab(tab)}
                   minW="120px"
-                  leftIcon={
-                    tab === 'All Markets' ? <FaListAlt /> :
-                      tab === 'Most recent' ? <FaCalendarDay /> :
-                        tab === 'Quests' ? <FaPlayCircle /> :
-                          tab === 'Results' ? <FaTrophy /> :
-                            tab === 'BTC/USD' ? <SiBitcoinsv /> :
-                              tab === 'ETH/USD' ? <FaEthereum /> :
-                                tab === 'LINK/USD' ? <SiChainlink /> :
-                                  tab === 'DAI/USD' ? < SiDogecoin /> :
-                                    tab === 'USDC/USD' ? <IoLogoUsd /> :
-                                      <FaCoins />
-                  }
+                  fontWeight="bold"
+                  fontSize="lg"
+                  color={currentTab === tab ? "white" : "gray.400"}
+                  transform={currentTab === tab ? "scale(1.1)" : "scale(1)"}
+                  transition="all 0.2s ease-in-out"
+                  _hover={{
+                    color: "white",
+                    transform: "scale(1.1)",
+                    bg: "transparent",
+                  }}
+                  _active={{
+                    bg: "transparent",
+                  }}
+                  bg="transparent"
                 >
                   {tab}
                 </Button>
+
               ))}
+
+              <Box minW="100px">
+                <Select
+                  w="100px"
+                  placeholder="Pair"
+                  size="md"
+                  variant="unstyled"
+                  value={currentTradingPairFilter || ''}
+                  onChange={(e) => {
+                    setCurrentTradingPairFilter(e.target.value);
+                    setCurrentTab('Pair');
+                  }}
+                  fontWeight="bold"
+                  fontSize="lg"
+                  borderRadius="lg"
+                  height="40px"
+                  bg="transparent"
+                  transform={currentTradingPairFilter ? "scale(1.1)" : "scale(1)"}
+                  transition="all 0.2s ease-in-out"
+                  color={currentTradingPairFilter ? "white" : "gray.400"}
+                  _hover={{
+                    bg: "transparent",
+                    color: "white",
+                    transform: "scale(1.1)",
+                  }}
+                  _focus={{
+                    boxShadow: "none",
+                    bg: "transparent",
+                  }}
+                  iconColor="#EDEDEE"
+                >
+                  {Array.from(new Set(deployedContracts.map(c => c.tradingPair))).map(pair => (
+                    <option key={pair} value={pair} style={{ padding: '8px', backgroundColor: '#0A0B0E', color: 'white' }}>
+                      {pair}
+                    </option>
+                  ))}
+                </Select>
+              </Box>
+
             </HStack>
           </Flex>
         </Box>
@@ -1031,7 +1465,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
           // {/* Loading message */}
           <Text color="gray.600">Loading...</Text>
         ) : deployedContracts.length > 0 ? (
-          // {/* Display contracts in a grid layout */}
+          // {/* Display contracts in a grid layout - 4 columns, which will create 3 rows with 12 items */}
           <SimpleGrid
             columns={{ base: 1, md: 2, lg: 3, xl: 4 }}
             spacing={4}
@@ -1043,7 +1477,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                 key={index}
                 p="2px"
                 borderRadius="lg"
-                background="linear-gradient(135deg, #00c6ff, #0072ff, #6a11cb, #2575fc)" 
+                background="linear-gradient(135deg, #00c6ff, #0072ff, #6a11cb, #2575fc)"
                 transition="transform 0.2s"
                 _hover={{ transform: 'translateY(-4px)' }}
                 cursor="pointer"
@@ -1117,10 +1551,10 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     </Box>
 
 
-                    <HStack direction="column" w="100%" mb={4} width="650px">
+                    <HStack direction="column" w="100%" mb={4} width="100%">
                       {Number(phase) === Phase.Maturity || Number(phase) === Phase.Expiry ? (
                         <Box
-                          w="380px"
+                          w="100%"
                           py={2}
                           alignItems="center"
                           borderRadius="md"
@@ -1128,6 +1562,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                           border="1px solid"
                           borderColor="gray.600"
                           textAlign="center"
+                          mt="10px"
                         >
                           <Text
                             fontSize="md"
@@ -1148,7 +1583,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
                           {/* Long/Short bar */}
                           <Flex
-                            w="100%"
+                            w="1000%"
                             h="13px"
                             borderRadius="full"
                             overflow="hidden"
@@ -1156,8 +1591,8 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                             borderColor="gray.600"
                             bg="gray.800"
                             boxShadow="inset 0 1px 3px rgba(0,0,0,0.6)"
-                            mt="20px"
-                            mb="10px"
+                            mt="18px"
+                            mb="20px"
                           >
                             <Box
                               h="100%"
@@ -1175,7 +1610,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                           </Flex>
 
                           {/* Percentage SHORT */}
-                          <Flex justify="space-between" w="100%">
+                          <Flex justify="space-between" mb={1}>
                             <Text fontSize="sm" fontWeight="bold" color="#ED5FA7" textAlign="left">
                               {contractPercentages[address]?.short.toFixed(0)}%
                             </Text>
