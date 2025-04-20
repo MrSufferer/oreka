@@ -10,6 +10,8 @@ import { useAuth } from '../context/AuthContext';
 import { UnorderedList, ListItem } from '@chakra-ui/react';
 import { PriceService } from '../services/PriceService';
 import { format, toZonedTime } from 'date-fns-tz';
+import { useRouter } from 'next/router';
+
 
 // Define the properties expected by the Owner component
 interface OwnerProps {
@@ -61,8 +63,8 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
     { value: "BTCUSD", label: "BTC/USD", currentPrice: 47406.92, priceFeedAddress: "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43" },
     { value: "ETHUSD", label: "ETH/USD", currentPrice: 3521.45, priceFeedAddress: "0x694AA1769357215DE4FAC081bf1f309aDC325306" },
     { value: "LINKUSD", label: "LINK/USD", currentPrice: 12.87, priceFeedAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF" },
-    { value: "DAIUSD", label: "DAI/USD", currentPrice: 1.00, priceFeedAddress: "0x14866185B1962B63C3Ea9E03Bc1da838bab34C19" },
-    { value: "USDCUSD", label: "USDC/USD", currentPrice: 1.08, priceFeedAddress: "0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E" },
+    { value: "SNXUSD", label: "SNX/USD", currentPrice: 0.65, priceFeedAddress: "0xc0F82A46033b8BdBA4Bb0B0e28Bc2006F64355bC" },
+    { value: "WSTETHUSD", label: "WSTETH/USD", currentPrice: 2000.00, priceFeedAddress: "0xaaabb530434B0EeAAc9A42E25dbC6A22D7bE218E" },
   ]);
 
   // State for market creator fee
@@ -75,6 +77,9 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
   // Factory contract address from config
   const FactoryAddress = FACTORY_ADDRESS; // Address of the factory contract
   const toast = useToast(); // Toast notification handler
+
+  // Router for redirecting to the new contract page
+  const router = useRouter();
 
   // Handler for coin selection dropdown
   const handleCoinSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -527,6 +532,7 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       
       // Refresh wallet balance after deployment
       refreshBalance(); // Refresh wallet balance
+      router.push('/listaddress/1');
       
     } catch (error) {
       console.error("Error deploying contract:", error); // Log error if deployment fails
@@ -651,8 +657,8 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
           { value: "BTCUSD", label: "BTC/USD", currentPrice: 1 / parseFloat(rates.BTC), priceFeedAddress: "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43" },
           { value: "ETHUSD", label: "ETH/USD", currentPrice: 1 / parseFloat(rates.ETH), priceFeedAddress: "0x694AA1769357215DE4FAC081bf1f309aDC325306" },
           { value: "LINKUSD", label: "LINK/USD", currentPrice: 1 / parseFloat(rates.LINK), priceFeedAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF" },
-          { value: "DAIUSD", label: "DAI/USD", currentPrice: 1 / parseFloat(rates.DAI), priceFeedAddress: "0x14866185B1962B63C3Ea9E03Bc1da838bab34C19" },
-          { value: "USDCUSD", label: "USDC/USD", currentPrice: 1 / parseFloat(rates.USDC), priceFeedAddress: "0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E" }
+          { value: "SNXUSD", label: "SNX/USD", currentPrice: 1 / parseFloat(rates.SNX), priceFeedAddress: "0xc0F82A46033b8BdBA4Bb0B0e28Bc2006F64355bC" },
+          { value: "WSTETHUSD", label: "WSTETH/USD", currentPrice: 1 / parseFloat(rates.WSTETH), priceFeedAddress: "0xaaabb530434B0EeAAc9A42E25dbC6A22D7bE218E" }
         ]);
       } catch (error) {
         console.error("Error fetching prices from Coinbase:", error);
@@ -1186,6 +1192,7 @@ const formattedSymbol = symbol.includes('-')
                 }}
                 transition="all 0.2s"
                 isDisabled={!selectedCoin || !strikePrice || !maturityDate || !maturityTime}
+
               >
                 Create market
               </Button>

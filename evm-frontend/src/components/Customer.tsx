@@ -213,6 +213,77 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
 
     }
   }, [router.query]);
+
+  /**
+ * Effect to load contract data from localStorage when component mounts
+ * Takes advantage of preloaded data to render UI immediately
+ */
+  useEffect(() => {
+    const cachedData = localStorage.getItem('contractData');
+    if (cachedData) {
+      try {
+        const parsedData = JSON.parse(cachedData);
+        const timestamp = parsedData.timestamp || 0;
+        const now = Date.now();
+
+        // Use cache data if it was saved recently (within 5 minutes)
+        if (now - timestamp < 5 * 60 * 1000) {
+          console.log("Using enhanced cached contract data");
+
+          // Update all required state variables from cache
+          if (parsedData.tradingPair) {
+            setTradingPair(parsedData.tradingPair);
+            setChartSymbol(parsedData.chartSymbol || getChartSymbolFromTradingPair(parsedData.tradingPair));
+          }
+
+          // Use pre-formatted strike price if available
+          if (parsedData.formattedStrikePrice) {
+            setStrikePrice(parsedData.formattedStrikePrice);
+          } else {
+            setStrikePrice(
+              parsedData.strikePrice ?
+                (parseInt(parsedData.strikePrice.toString()) / 10 ** 8).toFixed(4) :
+                '0'
+            );
+          }
+
+          // Set phase information
+          setCurrentPhase(parseInt(parsedData.phase));
+          setMaturityTime(parseInt(parsedData.maturityTime));
+
+          // Set time-related data
+          if (parsedData.deployTime) setDeployTime(parseInt(parsedData.deployTime));
+          if (parsedData.biddingStartTime) setBiddingStartTime(parseInt(parsedData.biddingStartTime));
+          if (parsedData.resolveTime) setResolveTime(parseInt(parsedData.resolveTime));
+
+          // Set position data
+          if (parsedData.positionData) {
+            setPositions(parsedData.positionData);
+          } else if (parsedData.longAmount && parsedData.shortAmount) {
+            setPositions({
+              long: parseFloat(parsedData.longAmount),
+              short: parseFloat(parsedData.shortAmount)
+            });
+          }
+
+          // Add initial position history point if available
+          if (parsedData.positionPercentages) {
+            setPositionHistory([{
+              timestamp: Math.floor(timestamp / 1000),
+              longPercentage: parsedData.positionPercentages.long,
+              shortPercentage: parsedData.positionPercentages.short,
+              isMainPoint: true
+            }]);
+          }
+
+          // Mark as loaded initial data
+          setIsLoadingContractData(false);
+        }
+      } catch (error) {
+        console.error("Error parsing cached contract data:", error);
+      }
+    }
+  }, []);
   /**
  * Effect to initialize contract address from props or localStorage
  */
@@ -312,6 +383,50 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
    */
   const fetchMarketDetails = async () => {
     if (!contract || !walletAddress) return;
+
+    // Check if we have recent cached data
+    const cachedData = localStorage.getItem('contractData');
+    if (cachedData) {
+      try {
+        const parsedData = JSON.parse(cachedData);
+        const timestamp = parsedData.timestamp || 0;
+        const now = Date.now();
+
+        // If we have very recent data (within 30 seconds), prioritize user-specific data only
+        if (now - timestamp < 30 * 1000 && parsedData.isPreloaded) {
+          console.log("Using very recent cached data, only fetching user-specific data");
+
+          // Only fetch user-specific data
+          const [longPosition, shortPosition] = await Promise.all([
+            contract.longBids(walletAddress),
+            contract.shortBids(walletAddress)
+          ]);
+
+          // Update user positions from mappings
+          setUserPositions({
+            long: parseFloat(ethers.utils.formatEther(longPosition)),
+            short: parseFloat(ethers.utils.formatEther(shortPosition))
+          });
+
+          // Update userPosition based on current position
+          if (parseFloat(ethers.utils.formatEther(longPosition)) > 0) {
+            setUserPosition(Side.Long);
+          } else if (parseFloat(ethers.utils.formatEther(shortPosition)) > 0) {
+            setUserPosition(Side.Short);
+          } else {
+            setUserPosition(null);
+          }
+
+          // Also fetch contract balance which can change frequently
+          await fetchContractBalance();
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking recent cached data:", error);
+      }
+    }
+
+    // If no recent cache or error occurred, fetch everything as normal
     try {
       const [
         positions,
@@ -401,6 +516,40 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         const finalPriceFormatted = (parseInt(oracleDetails.finalPrice.toString()) / 10 ** 8).toFixed(4);
         setFinalPrice(finalPriceFormatted);
       }
+
+      const updatedContractData = {
+        address: contractAddress,
+        timestamp: Date.now(),
+        tradingPair,
+        chartSymbol: getChartSymbolFromTradingPair(tradingPair),
+        phase: phase.toString(),
+        formattedStrikePrice: strikePriceFormatted,
+        strikePrice: oracleDetails.strikePrice.toString(),
+        maturityTime: maturityTime.toString(),
+        deployTime: deployTime.toString(),
+        biddingStartTime: biddingStartTime.toString(),
+        resolveTime: resolveTime.toString(),
+        longAmount: ethers.utils.formatEther(positions.long),
+        shortAmount: ethers.utils.formatEther(positions.short),
+        positionData: {
+          long: parseFloat(ethers.utils.formatEther(positions.long)),
+          short: parseFloat(ethers.utils.formatEther(positions.short))
+        },
+        positionPercentages: {
+          long: positions.long.gt(0) || positions.short.gt(0) ?
+            (parseFloat(ethers.utils.formatEther(positions.long)) /
+              (parseFloat(ethers.utils.formatEther(positions.long)) +
+                parseFloat(ethers.utils.formatEther(positions.short)))) * 100 : 50,
+          short: positions.long.gt(0) || positions.short.gt(0) ?
+            (parseFloat(ethers.utils.formatEther(positions.short)) /
+              (parseFloat(ethers.utils.formatEther(positions.long)) +
+                parseFloat(ethers.utils.formatEther(positions.short)))) * 100 : 50
+        },
+        totalDeposited: ethers.utils.formatEther(totalDeposited),
+        isPreloaded: true
+      };
+
+      localStorage.setItem('contractData', JSON.stringify(updatedContractData));
 
     } catch (error) {
       console.error("Error fetching market details:", error);
@@ -730,7 +879,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   const canClaimReward = useCallback(async () => {
     if (!contract || currentPhase !== Phase.Expiry) return;
 
-      try {
+    try {
 
 
       // Check if already claimed
@@ -739,6 +888,15 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
       const contractWithSigner = contract.connect(signer);
+
+      const tx = await contractWithSigner.claimReward();
+      await tx.wait();
+
+      await Promise.all([
+        fetchMarketDetails(),
+        fetchContractBalance(),
+        canClaimReward(), 
+      ]);
 
       // Get oracle details
       const oracleDetails = await contract.oracleDetails();
@@ -772,16 +930,16 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         const fee = (reward * Number(feePercentage)) / 100;
         const finalReward = reward.sub(fee);
 
-          setReward(parseFloat(ethers.utils.formatEther(finalReward)));
-        } else {
-          setShowClaimButton(false);
-        }
-
-      } catch (error) {
-        console.error("Error checking claim eligibility:", error);
+        setReward(parseFloat(ethers.utils.formatEther(finalReward)));
+      } else {
         setShowClaimButton(false);
       }
-    }, [contract, currentPhase, walletAddress]);
+
+    } catch (error) {
+      console.error("Error checking claim eligibility:", error);
+      setShowClaimButton(false);
+    }
+  }, [contract, currentPhase, walletAddress]);
 
   // Effect to check claim eligibility
   useEffect(() => {
@@ -828,18 +986,18 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   useEffect(() => {
     const priceService = PriceService.getInstance();
 
-      const handlePriceUpdate = (priceData: PriceData) => {
-        setCurrentPrice(priceData.price);
-      };
+    const handlePriceUpdate = (priceData: PriceData) => {
+      setCurrentPrice(priceData.price);
+    };
 
-      // Subscribe to price updates when component mounts
-      priceService.subscribeToPriceUpdates(handlePriceUpdate, chartSymbol, 5000);
+    // Subscribe to price updates when component mounts
+    priceService.subscribeToPriceUpdates(handlePriceUpdate, chartSymbol, 5000);
 
-      // Cleanup subscription when component unmounts
-      return () => {
-        priceService.unsubscribeFromPriceUpdates(handlePriceUpdate);
-      };
-    }, []);
+    // Cleanup subscription when component unmounts
+    return () => {
+      priceService.unsubscribeFromPriceUpdates(handlePriceUpdate);
+    };
+  }, []);
 
   // Effect to update the price chart
   useEffect(() => {
@@ -859,10 +1017,10 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       }
     };
 
-      fetchPriceHistory();
-      const interval = setInterval(fetchPriceHistory, 60000);
-      return () => clearInterval(interval);
-    }, [chartSymbol]);
+    fetchPriceHistory();
+    const interval = setInterval(fetchPriceHistory, 60000);
+    return () => clearInterval(interval);
+  }, [chartSymbol]);
 
   // Function to expire market
   const handleExpireMarket = async () => {
@@ -882,11 +1040,11 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         isClosable: true,
       });
 
-        const tx = await contractWithSigner.expireMarket({
-          gasLimit: 500000
-        });
+      const tx = await contractWithSigner.expireMarket({
+        gasLimit: 500000
+      });
 
-        console.log("Transaction sent:", tx.hash);
+      console.log("Transaction sent:", tx.hash);
 
       // Show transaction sent message
       toast({
@@ -897,7 +1055,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         isClosable: true,
       });
 
-        await tx.wait();
+      await tx.wait();
 
       // Show success message
       toast({
@@ -907,26 +1065,26 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         isClosable: true,
       });
 
-        // Refresh market details
-        await fetchMarketDetails();
+      // Refresh market details
+      await fetchMarketDetails();
 
       // Update UI immediately
       setCurrentPhase(Phase.Expiry);
       setCanExpire(false);
 
-        return true;
-      } catch (error: any) {
-        console.error("Error expiring market:", error);
-        toast({
-          title: "Failed to expire market",
-          description: error.message || "An unexpected error occurred",
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        });
-        return false;
-      }
-    };
+      return true;
+    } catch (error: any) {
+      console.error("Error expiring market:", error);
+      toast({
+        title: "Failed to expire market",
+        description: error.message || "An unexpected error occurred",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+      return false;
+    }
+  };
 
   // Effect to load contract data
   useEffect(() => {
@@ -935,12 +1093,12 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         const contractAddress = localStorage.getItem('selectedContractAddress');
         if (!contractAddress) return;
 
-          const provider = new ethers.providers.Web3Provider(window.ethereum);
-          const contract = new ethers.Contract(
-            contractAddress,
-            BinaryOptionMarket.abi,
-            provider
-          );
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const contract = new ethers.Contract(
+          contractAddress,
+          BinaryOptionMarket.abi,
+          provider
+        );
 
         // Get all necessary data from contract
         try {
@@ -1004,10 +1162,10 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           //setChartSymbol('BTCUSDT');
         }
 
-        } catch (error) {
-          console.error("Error:", error);
-        }
-      };
+      } catch (error) {
+        console.error("Error:", error);
+      }
+    };
 
   }, []);
 
@@ -1015,11 +1173,11 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   const resolve = async () => {
     if (!contract) return;
 
-      try {
-        console.log("Attempting to resolve market...");
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const signer = provider.getSigner();
-        const contractWithSigner = contract.connect(signer);
+    try {
+      console.log("Attempting to resolve market...");
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = provider.getSigner();
+      const contractWithSigner = contract.connect(signer);
 
       // Show processing message
       toast({
@@ -1030,11 +1188,11 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         isClosable: true,
       });
 
-        const tx = await contractWithSigner.resolveMarket({
-          gasLimit: 500000
-        });
+      const tx = await contractWithSigner.resolveMarket({
+        gasLimit: 500000
+      });
 
-        console.log("Transaction sent:", tx.hash);
+      console.log("Transaction sent:", tx.hash);
 
       // Show transaction sent message
       toast({
@@ -1045,7 +1203,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         isClosable: true,
       });
 
-        await tx.wait();
+      await tx.wait();
 
       // Show success message
       toast({
@@ -1055,109 +1213,114 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         isClosable: true,
       });
 
-        // Refresh market details
-        await fetchMarketDetails();
+      // Refresh market details
+      await fetchMarketDetails();
 
       // Update UI immediately
       setCurrentPhase(Phase.Maturity);
       setCanResolve(false);
 
-        return true;
-      } catch (error: any) {
-        console.error("Error resolving market:", error);
-        toast({
-          title: "Failed to resolve market",
-          description: error.message || "An unexpected error occurred",
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        });
-        return false;
-      }
-    };
+      return true;
+    } catch (error: any) {
+      console.error("Error resolving market:", error);
+      toast({
+        title: "Failed to resolve market",
+        description: error.message || "An unexpected error occurred",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+      return false;
+    }
+  };
 
   // Function to claim reward for customer
   const claimReward = async () => {
     if (!contract || currentPhase !== Phase.Expiry) return;
 
-      try {
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const signer = provider.getSigner();
-        const contractWithSigner = contract.connect(signer);
-
-        const tx = await contractWithSigner.claimReward();
-        await tx.wait();
-
-        // Update states after successful claim
-        await Promise.all([
-          fetchMarketDetails(),
-          fetchContractBalance()
-        ]);
-
-        await refreshBalance();
-        setShowClaimButton(false);
-        setReward(0);
-
-        toast({
-          title: "Success",
-          description: "Successfully claimed reward!",
-          status: "success",
-          duration: 3000,
-        });
-
-      } catch (error) {
-        console.error("Error claiming reward:", error);
-        toast({
-          title: "Error claiming reward",
-          description: error.message,
-          status: "error",
-          duration: 3000,
-        });
-      }
-    };
-
-  // Function to withdraw funds
-  const handleWithdraw = async () => {
-    if (!contract || !isOwner || contractBalance <= 0) return;
-  
     try {
-      // Set a loading state
-      const isWithdrawing = true;
-      
-      // Get the most up-to-date contract balance before withdrawal
       const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const currentBalanceWei = await provider.getBalance(contractAddress);
-      const currentBalanceEth = parseFloat(ethers.utils.formatEther(currentBalanceWei));
-      
       const signer = provider.getSigner();
       const contractWithSigner = contract.connect(signer);
-      
-      // Show pending toast
+
+      const tx = await contractWithSigner.claimReward();
+      await tx.wait();
+
+      // Update states after successful claim
+      await Promise.all([
+        fetchMarketDetails(),
+        fetchContractBalance()
+      ]);
+
+      await refreshBalance();
+      setShowClaimButton(false);
+      setReward(0);
+
+      toast({
+        title: "Success",
+        description: "Successfully claimed reward!",
+        status: "success",
+        duration: 3000,
+      });
+
+    } catch (error) {
+      console.error("Error claiming reward:", error);
+      toast({
+        title: "Error claiming reward",
+        description: error.message,
+        status: "error",
+        duration: 3000,
+      });
+    }
+  };
+
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [withdrawalAmount, setWithdrawalAmount] = useState(0);
+  // Function to withdraw funds
+  const handleWithdraw = async () => {
+    if (!contract || !isOwner) return;
+
+    try {
+      setIsWithdrawing(true);
+
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = provider.getSigner();
+      const contractWithSigner = contract.connect(signer);
+
+      // Fetch totalDeposited & feePercentage
+      const [longAmount, shortAmount, fee] = await Promise.all([
+        contract.positions().then(p => p.long),
+        contract.positions().then(p => p.short),
+        contract.feePercentage()
+      ]);
+
+      const totalDeposited = longAmount.add(shortAmount);
+      const feeAmount = totalDeposited.mul(fee).div(1000); // fee unit = tenth of percent
+
+      const feeAmountEth = parseFloat(ethers.utils.formatEther(feeAmount));
+      setWithdrawalAmount(feeAmountEth);
+
       toast({
         title: "Processing withdrawal",
-        description: `Withdrawing ${currentBalanceEth.toFixed(4)} ETH to your wallet`,
+        description: `Withdrawing ${feeAmountEth.toFixed(4)} ETH to your wallet`,
         status: "info",
         duration: 2000,
         isClosable: true,
       });
-      
-      // Perform the withdrawal
+
       const tx = await contractWithSigner.withdraw();
       await tx.wait();
-      
-      // Success notification with the actual amount withdrawn
+
       toast({
         title: "Withdraw successful",
-        description: `${currentBalanceEth.toFixed(4)} ETH has been withdrawn to your wallet`,
+        description: `${feeAmountEth.toFixed(4)} ETH has been withdrawn`,
         status: "success",
         duration: 4000,
         isClosable: true,
       });
-      
-      // Refresh balances
+
       await fetchContractBalance();
       await refreshBalance();
-      
     } catch (error) {
       console.error("Error withdrawing funds:", error);
       toast({
@@ -1167,9 +1330,12 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         duration: 5000,
         isClosable: true,
       });
+    } finally {
+      setIsWithdrawing(false);
     }
   };
-  
+
+
 
   // Improved fetchPositionHistory
   const fetchPositionHistory = useCallback(async () => {
@@ -1354,11 +1520,11 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     }
   }, [contract, walletAddress]);
 
-    const isMarketEnded = (maturityTime: any, phase: string): boolean => {
-      const currentTime = new Date();
-      const maturityDate = new Date(maturityTime * 1000);
-      return currentTime.getTime() >= maturityDate.getTime();
-    };
+  const isMarketEnded = (maturityTime: any, phase: string): boolean => {
+    const currentTime = new Date();
+    const maturityDate = new Date(maturityTime * 1000);
+    return currentTime.getTime() >= maturityDate.getTime();
+  };
 
 
   // replace logic check phase based on time
@@ -1367,19 +1533,19 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
     const checkPhaseBasedOnTime = () => {
       const now = getCurrentTimestamp();
 
-        if (currentPhase === Phase.Bidding && now >= maturityTime) {
-          setCanResolve(true);
-        }
+      if (currentPhase === Phase.Bidding && now >= maturityTime) {
+        setCanResolve(true);
+      }
 
-        if (currentPhase === Phase.Maturity && resolveTime > 0 && now >= resolveTime + 30) {
-          setCanExpire(true);
-        }
-      };
+      if (currentPhase === Phase.Maturity && resolveTime > 0 && now >= resolveTime + 30) {
+        setCanExpire(true);
+      }
+    };
 
-      checkPhaseBasedOnTime();
-      const interval = setInterval(checkPhaseBasedOnTime, 1000);
-      return () => clearInterval(interval);
-    }, [currentPhase, maturityTime, resolveTime]);
+    checkPhaseBasedOnTime();
+    const interval = setInterval(checkPhaseBasedOnTime, 1000);
+    return () => clearInterval(interval);
+  }, [currentPhase, maturityTime, resolveTime]);
 
   // Calculate long percentages
   const longPercentage = useMemo(() => {
@@ -1394,10 +1560,10 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   }, [positions]);
 
 
-    const formatMaturityTime = (timestamp: number): string => {
-      if (!timestamp) return 'Pending';
-      return format(new Date(timestamp * 1000), 'MMM dd, yyyy HH:mm');
-    };
+  const formatMaturityTime = (timestamp: number): string => {
+    if (!timestamp) return 'Pending';
+    return format(new Date(timestamp * 1000), 'MMM dd, yyyy HH:mm');
+  };
 
   // Handle time range changes
   const handleTimeRangeChange = (range: string, chartType: 'price' | 'position') => {
@@ -1411,32 +1577,32 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   const handleResolveMarket = async () => {
     if (!contract) return;
 
-      try {
-        setIsResolvingMarket(true);
+    try {
+      setIsResolvingMarket(true);
 
-        const result = await resolve();
+      const result = await resolve();
 
-        if (result) {
-          toast({
-            title: "Market resolved successfully",
-            status: "success",
-            duration: 3000,
-            isClosable: true,
-          });
-        }
-      } catch (error) {
-        console.error("Error resolving market:", error);
+      if (result) {
         toast({
-          title: "Failed to resolve market",
-          description: error.message || "An unexpected error occurred",
-          status: "error",
-          duration: 5000,
+          title: "Market resolved successfully",
+          status: "success",
+          duration: 3000,
           isClosable: true,
         });
-      } finally {
-        setIsResolvingMarket(false);
       }
-    };
+    } catch (error) {
+      console.error("Error resolving market:", error);
+      toast({
+        title: "Failed to resolve market",
+        description: error.message || "An unexpected error occurred",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsResolvingMarket(false);
+    }
+  };
 
   // call calculatePotentialProfit when user input ETH
   const handleBidAmountChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1617,31 +1783,124 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   const strikeColor = bgColors[indexBg % bgColors.length];
 
 
-    return (
-      <Box bg="black" minH="100vh">
-        {/* Header Section */}
-        <Flex px={6} py={4} alignItems="center">
-          <Button
-            leftIcon={<FaChevronLeft />}
-            variant="ghost"
-            color="#FEDF56"
-            onClick={() => router.push('/listaddress')}
-            _hover={{ bg: 'rgba(254, 223, 86, 0.1)' }}
+  return (
+    <Box bg="black" minH="100vh">
+      {/* Header Section */}
+      <Flex px={6} py={4} alignItems="center">
+        <Button
+          leftIcon={<FaChevronLeft />}
+          variant="ghost"
+          color="gray.400"
+          _hover={{
+            color: "white",
+          }}
+          onClick={() => {
+            // Clear contract-specific data from localStorage when returning to markets
+            //localStorage.removeItem('contractData');
+
+            const cachedContracts = localStorage.getItem('deployedContracts');
+            if (cachedContracts) {
+              try {
+                const parsed = JSON.parse(cachedContracts);
+
+                // Save current contract list to sessionStorage for passing
+                sessionStorage.setItem('cachedDeployedContracts', JSON.stringify(parsed));
+
+                // Redirect to page containing ListAddressOwner
+                router.push('/listaddress/1');
+              } catch (err) {
+                console.error("Failed to parse deployed contracts cache:", err);
+                router.push('/listaddress/1');
+              }
+            } else {
+              router.push('/listaddress/1');
+            }
+          }}
+        >
+          Markets
+        </Button>
+
+
+        <HStack spacing={4} ml="auto">
+          {/* Balance Box */}
+          <Box
+            p="2px"
+            borderRadius="md"
+            bg="transparent"
+            sx={{
+              backgroundImage: "linear-gradient(270deg, #ff0059, #5a73d8, #5858b5 , #77efef, #4a63c8)",
+              backgroundSize: "400% 400%",
+              animation: "gradient-border 8s ease infinite",
+              borderRadius: "8px"
+            }}
           >
-            Markets
-          </Button>
+            <HStack
+              p={2}
+              bg="#1A1C21"
+              borderRadius="md"
+              w="full"
+            >
+              <Text color="white" fontWeight="medium">
+                {Number(balance).toFixed(4)} ETH
+              </Text>
+            </HStack>
 
+            {/* Inject CSS animation */}
+            <style jsx>{`
+                  @keyframes gradient-border {
+                    0% { background-position: 0% 50%; }
+                    50% { background-position: 100% 50%; }
+                    100% { background-position: 0% 50%; }
+                  }
+                `}
+            </style>
+          </Box>
 
-          <HStack spacing={6} ml="auto" color="#FEDF56">
-            <Icon as={FaWallet} />
-            <Text> Wallet Address: {walletAddress ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}` : 'Not Connected'}</Text>
-            <Icon as={FaCoins} />
-            <Text>Balance: {Number(balance).toFixed(4)} ETH</Text>
-          </HStack>
-        </Flex>
+          {/* Wallet Address Box */}
+          <Box
+            p="2px"
+            borderRadius="lg"
+            sx={{
+              backgroundImage: "linear-gradient(270deg, #eaea72, #f49a24, #e25375, #f2f2bf, #f2f2cd)",
+              backgroundSize: "400% 400%",
+              animation: "gradient-border 6s ease infinite",
+              display: "inline-block",
+              backgroundColor: "transparent"
+            }}
+          >
+            <Box
+              display="flex"
+              alignItems="center"
+              bg="gray.800"
+              borderRadius="lg"
+              px={4}
+              py={2}
+              boxShadow="md"
+              transition="all 0.2s"
+              _hover={{ bg: "gray.700" }}
+            >
+              <Text color="white" fontWeight="semibold" fontSize="md">
+                {walletAddress
+                  ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}`
+                  : 'Not Connected'}
+              </Text>
+            </Box>
+
+            <style jsx>{`
+    @keyframes gradient-border {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  `}</style>
+          </Box>
+
+        </HStack>
+
+      </Flex>
 
       {/* Second line - Market Info */}
-      <Box display="flex" alignItems="center" mb={6} ml={6}>
+      <Box display="flex" alignItems="center" mb={6} ml={10}>
         <HStack>
           {/* Coin Image */}
           {isLoadingContractData ? (
@@ -1704,15 +1963,67 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
       </Box>
 
 
-        {/* Main Content */}
-        <Flex direction={{ base: 'column', md: 'row' }} gap={6}>
-          {/* Left Side - Charts and Rules */}
-          <Box width={{ base: '100%', md: '80%' }} pr={{ base: 0, md: 4 }} ml={4}>
-            <Tabs variant="line" colorScheme="yellow">
-              <TabList>
-                <Tab>Price Chart</Tab>
-                <Tab>Position Chart</Tab>
+      {/* Main Content */}
+      <Flex direction={{ base: 'column', md: 'row' }} gap={6}>
+        {/* Left Side - Charts and Rules */}
+        <Box width={{ base: '100%', md: '80%' }} pr={{ base: 0, md: 4 }} ml={4} >
+          <Tabs variant="line" colorScheme="yellow" border="1px solid" borderColor="gray.700" borderRadius="xl" pb={2} >
+            <Box pb={1} >
+              <TabList
+                borderBottom="2px solid"
+                borderColor="gray.600"
+                px={6}
+                py={3}
+                display="grid"
+                gridTemplateColumns="1fr 1fr"
+                alignItems="center"
+              >
+                <Flex justify="center">
+                  <Tab
+                    fontWeight="bold"
+                    fontSize="sm"
+                    _selected={{
+                      bg: "blue.600",
+                      color: "white",
+                      borderRadius: "md",
+                      boxShadow: "md",
+                    }}
+                    _hover={{
+                      bg: "gray.700",
+                      color: "white",
+                    }}
+                    px={6}
+                    py={2}
+                    transition="all 0.2s"
+                  >
+                    Price Chart
+                  </Tab>
+                </Flex>
+
+                <Flex justify="center">
+                  <Tab
+                    fontWeight="bold"
+                    fontSize="sm"
+                    _selected={{
+                      bg: "green.500",
+                      color: "white",
+                      borderRadius: "md",
+                      boxShadow: "md",
+                    }}
+                    _hover={{
+                      bg: "gray.700",
+                      color: "white",
+                    }}
+                    px={6}
+                    py={2}
+                    transition="all 0.2s"
+                  >
+                    Position Chart
+                  </Tab>
+                </Flex>
               </TabList>
+
+            </Box>
 
             <TabPanels>
               <TabPanel p={0} pt={4}>
@@ -1736,20 +2047,22 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
               </TabPanel>
 
               <TabPanel p={0} pt={4}>
-                <MarketCharts
-                  chartData={[]}
-                  positionHistory={positionHistory}
-                  positions={positions}
-                  strikePrice={parseFloat(strikePrice)}
-                  timeRange={positionTimeRange}
-                  chartType="position"
-                  onTimeRangeChange={handleTimeRangeChange}
-                  chartSymbol={chartSymbol}
-                  biddingStartTime={biddingStartTime}
-                  maturityTime={maturityTime}
-                  enhancedPositionData={enhancedPositionData}
-                  setEnhancedPositionData={setEnhancedPositionData}
-                />
+                <Box position="relative" width="100%">
+                  <MarketCharts
+                    chartData={[]}
+                    positionHistory={positionHistory}
+                    positions={positions}
+                    strikePrice={parseFloat(strikePrice)}
+                    timeRange={positionTimeRange}
+                    chartType="position"
+                    onTimeRangeChange={handleTimeRangeChange}
+                    chartSymbol={chartSymbol}
+                    biddingStartTime={biddingStartTime}
+                    maturityTime={maturityTime}
+                    enhancedPositionData={enhancedPositionData}
+                    setEnhancedPositionData={setEnhancedPositionData}
+                  />
+                </Box>
               </TabPanel>
             </TabPanels>
           </Tabs>
@@ -1829,22 +2142,22 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
         {/* Right Side - Bid Panel and Market Info */}
 
 
-          <Box width={{ base: '100%', md: '20%' }} mr={4}>
-            {/* Strike Price */}
-            <Box
-              bg="gray.800"
-              p={4}
-              borderRadius="xl"
-              mb={4}
-              borderWidth={1}
-              borderColor="gray.700"
-            >
-              <Flex justify="space-between" align="center" textAlign="center" fontSize="20px" color="#FEDF56">
-                <HStack justify="center" align="center">
-                  <Text color="gray.400">Strike Price: </Text>
-                  <Text fontWeight="bold">{strikePrice} USD</Text>
-                </HStack>
-              </Flex>
+        <Box width={{ base: '100%', md: '20%' }} mr={4}>
+          {/* Strike Price */}
+          <Box
+            bg="gray.800"
+            p={4}
+            borderRadius="xl"
+            mb={4}
+            borderWidth={1}
+            borderColor="gray.700"
+          >
+            <Flex justify="space-between" align="center" textAlign="center" fontSize="20px" color="#FEDF56">
+              <HStack justify="center" align="center">
+                <Text color="gray.400">Strike Price: </Text>
+                <Text fontWeight="bold">{strikePrice} USD</Text>
+              </HStack>
+            </Flex>
 
             {/* Show Final Price in Maturity and Expiry phases */}
             {(currentPhase === Phase.Maturity || currentPhase === Phase.Expiry) && (
@@ -1853,13 +2166,13 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                   <Text color="gray.400">Final Price: </Text>
                   {finalPrice > strikePrice ? (
                     <>
-                    <Text fontWeight="bold" color="green">{finalPrice} </Text>
-                    <Text fontWeight="bold" color="#FEDF56">USD</Text>
+                      <Text fontWeight="bold" color="green">{finalPrice} </Text>
+                      <Text fontWeight="bold" color="#FEDF56">USD</Text>
                     </>
                   ) : (
                     <>
                       <Text fontWeight="bold" color="red">{finalPrice} </Text>
-                      <Text fontWeight="bold" color="#FEDF56">USD</Text> 
+                      <Text fontWeight="bold" color="#FEDF56">USD</Text>
                     </>
                   )}
                 </HStack>
@@ -1877,7 +2190,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                 width="100%"
                 mt={4}
               >
-                Claim {reward.toFixed(10)} ETH
+                Claim {reward.toFixed(4)} ETH
               </Button>
             )}
             {isOwner && contractBalance > 0 && currentPhase === Phase.Expiry && (
@@ -1890,11 +2203,11 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                 width="100%"
                 mt={2}
               >
-                Withdraw {contractBalance.toFixed(10)} ETH
+                Withdraw {withdrawalAmount.toFixed(4)} ETH
               </Button>
             )}
           </Box>
-
+          {(currentPhase === Phase.Trading || currentPhase === Phase.Bidding) && (
           <Box
             bg="gray.800"
             p={4}
@@ -2103,6 +2416,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
               <Text color="white">{userPositions.short.toFixed(8)} ETH</Text>
             </Flex>
           </Box>
+          )}
           <Box p={4} borderRadius="xl" mb={4} borderWidth={1} borderColor="gray.700">
             <Text fontSize="lg" fontWeight="bold" mb={3} color="white">
               My Holdings

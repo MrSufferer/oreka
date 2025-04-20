@@ -67,14 +67,10 @@ import { ethers } from 'ethers';
 export const CHAINLINK_PRICE_FEEDS_MAP: { [key: string]: string } = {
   "0x1b44f3514812d835eb1bdb0acb33d3fa3351ee43": "BTC/USD",
   "0x694aa176935721d5e4fac081bf1f309adc325306": "ETH/USD",
-  "0x1a81afb8146aefcfc5e50e8479e826e7de55b910": "EUR/USD",
-  "0x8a6af2b75f23831adc973ce6288e5329f63d86c6": "USD/JPY",
-  "0x91fab41f5f3be955963a986366edacff1aaeaa83": "GBP/USD",
-  "0x14866185b1962b63c3ea9e03bc1da838bab34c19": "DAI/USD",
-  "0xc59e3633baac79493d98e63626716e204a45edf": "LINK/USD", // Asegúrate que la dirección sea lowercase
-  "0xa2f78ab2355fe2f984d808b5cee7fd0a93d5270e": "USDC/USD", // Asegúrate que la dirección sea lowercase
-  "0xb0c712f98dae1526c8e26132bc91c40ad4d5f9": "AUD/USD",   // Asegúrate que la dirección sea lowercase
-  "0x5fb1616f78da7afc9ff79e0371741a747d2a7f22": "BTC/ETH"
+  "0xc59e3633baac79493d98e63626716e204a45edf": "LINK/USD", 
+  "0xc0f82a46033b8bdba4bb0b0e28bc2006f64355bc": "SNX/USD",
+  "0xaaabb530434b0eeaac9a42e25dbc6a22d7be218e": "WSTETH/USD",
+
 };
 
 // Helper para obtener el par de trading desde la dirección del feed

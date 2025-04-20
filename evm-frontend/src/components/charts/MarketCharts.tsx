@@ -466,7 +466,7 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
           <HStack spacing={6}>
             <HStack spacing={1}>
               <Box w={3} h={3} borderRadius="full" bg="#00D7B5" />
-              <Text color="#00D7B5" fontWeight="bold">LONG: {longPercentage}%</Text>
+              <Text color="#00D7B5" fontWeight="bold">LONG: {longPercentage.toFixed(2)}%</Text>
             </HStack>
             <HStack spacing={1}>
               <Box w={3} h={3} borderRadius="full" bg="#FF6384" />
@@ -480,7 +480,7 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
            * Display a message if no position data is available
            * Centers the message vertically and horizontally
            */
-          <Flex height="300px" justify="center" align="center" color="gray.500">
+          <Flex height="500px" justify="center" align="center" color="gray.500">
             <Text>No position data available</Text>
           </Flex>
         ) : (
@@ -610,7 +610,7 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
           <Flex w="100%" justify="space-between" align="center" mb={2}>
             <VStack align="flex-start" fontSize="xl">
               <Text color="white" fontSize="4xl" fontWeight="bold">
-                ${hoverData?.close ? hoverData.close.toFixed(6) : '0.00'}
+                ${hoverData?.close ? hoverData.close.toFixed(4) : '0.00'}
               </Text>
               <Text
                 color={percentDiff >= 0 ? "#00D7B5" : "#FF6384"}

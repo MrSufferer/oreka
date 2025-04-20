@@ -417,14 +417,14 @@ export class PriceService {
         try {
           // Convert symbol from BTCUSDT -> bitcoin, ETHUSDT -> ethereum
           let coinId = 'bitcoin';
-          if (symbol.toLowerCase().includes('eth')) {
-            coinId = 'ethereum';
+          if (symbol.toLowerCase().includes('wsteth')) {
+            coinId = 'wrapped-steth';
           } else if (symbol.toLowerCase().includes('link')) {
             coinId = 'chainlink';
-          } else if (symbol.toLowerCase().includes('usdc')) {
-            coinId = 'usd-coin';
-          } else if (symbol.toLowerCase().includes('dai')) {
-            coinId = 'dai';
+          } else if (symbol.toLowerCase().includes('snx')) {
+            coinId = 'synthetix';
+          } else if (symbol.toLowerCase().includes('eth')) {
+            coinId = 'ethereum';
           }
           
           // Always fetch data for 7 days
@@ -483,8 +483,8 @@ export class PriceService {
     let lowestPoint = data[0];
 
     data.forEach(point => {
-      if (point.close > highestPoint.close) highestPoint = point + point * 0.2; // Add 20% to highest point
-      if (point.close < lowestPoint.close) lowestPoint = point - point * 0.2; // Subtract 20% from lowest point
+      if (point.close > highestPoint.close) highestPoint = point + point ; 
+      if (point.close < lowestPoint.close) lowestPoint = point - point ; 
     });
 
     const step = Math.floor(data.length / targetCount);
