@@ -35,6 +35,7 @@ export interface IBinaryOptionMarketService {
     getOwner(): Promise<string>;
     startMaturity(): Promise<void>;
     getPhase(): Promise<Phase>;
+    getTradingPair(): Promise<string>;
 }
 
 // Add enum for Phase 
@@ -469,19 +470,29 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
      */
     public async getPhase(): Promise<Phase> {
         this.assertInitialized();
-        const phaseState = await this.actor.getCurrentPhase();
+        const currentPhase = await this.actor.getCurrentPhase();
 
-        if ('Trading' in phaseState) {
-            return Phase.Trading;
-        } else if ('Bidding' in phaseState) {
-            return Phase.Bidding;
-        } else if ('Maturity' in phaseState) {
-            return Phase.Maturity;
-        } else if ('Expiry' in phaseState) {
-            return Phase.Expiry;
+        if ('Trading' in currentPhase) return Phase.Trading;
+        if ('Bidding' in currentPhase) return Phase.Bidding;
+        if ('Maturity' in currentPhase) return Phase.Maturity;
+        if ('Expiry' in currentPhase) return Phase.Expiry;
+
+        return Phase.Trading; // Default fallback
+    }
+
+    /**
+     * Get the trading pair directly from the canister
+     */
+    public async getTradingPair(): Promise<string> {
+        this.assertInitialized();
+        try {
+            console.log("DEBUG: Getting trading pair from canister");
+            const tradingPair = await this.actor.getTradingPair();
+            console.log("DEBUG: Got trading pair from canister:", tradingPair);
+            return tradingPair;
+        } catch (error) {
+            console.error("Error fetching trading pair:", error);
+            return "ETH/USD"; // Default fallback
         }
-
-        // Default to Bidding if we can't determine the phase
-        return Phase.Bidding;
     }
 }

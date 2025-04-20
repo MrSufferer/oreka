@@ -730,87 +730,71 @@ function Customer({ contractAddress }: CustomerProps) {
         const loadTradingPair = async () => {
             try {
                 if (marketService) {
+                    // Get trading pair directly from the canister using the dedicated method
+                    let tradingPair = await marketService.getTradingPair();
+                    console.log("DEBUG: Raw trading pair from canister:", tradingPair);
+
+                    // If trading pair doesn't include USD, add it
+                    if (!tradingPair.includes("/")) {
+                        tradingPair = `${tradingPair}/USD`;
+                    }
+
+                    console.log("DEBUG: Formatted trading pair:", tradingPair);
+                    setTradingPair(tradingPair);
+
+                    // Format for chart
+                    const formattedPair = tradingPair.replace('/', '-');
+                    setChartSymbol(formattedPair);
+
+                    // Get market details to get the strike price
                     const marketDetails = await marketService.getMarketDetails();
-                    if (marketDetails && marketDetails.tradingPair) {
-                        setTradingPair(marketDetails.tradingPair);
-                        tradingPairForChart = marketDetails.tradingPair.replace('/', '-');
-                        setChartSymbol(tradingPairForChart);
+                    console.log("DEBUG: Raw market details:", marketDetails);
+
+                    // Make sure to properly set the strike price from the canister
+                    if (marketDetails && marketDetails.oracleDetails) {
+                        const strikeValue = marketDetails.oracleDetails.strikePrice;
+                        console.log("DEBUG: Raw strike price value:", strikeValue);
+                        console.log("DEBUG: Strike price type:", typeof strikeValue);
+
+                        // Ensure we have a valid number
+                        if (typeof strikeValue === 'number' && !isNaN(strikeValue)) {
+                            console.log("DEBUG: Setting strike price to:", strikeValue);
+                            setStrikePrice(strikeValue);
+                        } else {
+                            console.error("Strike price is not a valid number:", strikeValue);
+                            setStrikePrice(0); // Default fallback
+                        }
                     }
                 }
             } catch (error) {
-                console.error("Error loading trading pair:", error);
+                console.error("Error loading trading pair and strike price:", error);
             }
         };
 
-        loadTradingPair();
+        // Load the trading pair information first
+        loadTradingPair().then(() => {
+            // Subscribe to price updates after trading pair is loaded
+            const unsubscribe = priceService.subscribeToPriceUpdates((data: PriceData) => {
+                setCurrentPrice(data.price);
+            }, tradingPairForChart);
 
-        // Subscribe to price updates
-        const unsubscribe = priceService.subscribeToPriceUpdates((data: PriceData) => {
-            setCurrentPrice(data.price);
-        }, tradingPairForChart);
-
-        // Load historical price data
-        const loadChartData = async () => {
-            try {
-                const data = await priceService.fetchKlines(tradingPairForChart);
-                setChartData(data);
-            } catch (error) {
-                console.error("Error loading chart data:", error);
-            }
-        };
-
-        loadChartData();
-
-        // Create position history for the chart
-        const generatePositionHistory = () => {
-            const history = [];
-            const now = Math.floor(Date.now() / 1000);
-
-            // Only generate mock position history if we don't have real data
-            // Start from bidding time to current time
-            if (biddingStartTime) {
-                const startTime = biddingStartTime;
-                const endTime = now;
-                const interval = Math.max(Math.floor((endTime - startTime) / 10), 1);
-
-                let longPercent = 50;
-                let shortPercent = 50;
-
-                for (let time = startTime; time <= endTime; time += interval) {
-                    // Generate some random variation
-                    const variation = Math.random() * 10 - 5; // -5 to +5 percent
-                    longPercent = Math.max(10, Math.min(90, longPercent + variation));
-                    shortPercent = 100 - longPercent;
-
-                    history.push({
-                        timestamp: time,
-                        longPercentage: longPercent / 100,
-                        shortPercentage: shortPercent / 100,
-                        isMainPoint: time === startTime || time === endTime
-                    });
+            // Load historical price data
+            const loadChartData = async () => {
+                try {
+                    const data = await priceService.fetchKlines(tradingPairForChart);
+                    setChartData(data);
+                } catch (error) {
+                    console.error("Error loading chart data:", error);
                 }
+            };
 
-                // Add the current position percentages
-                if (longPercentage !== null && shortPercentage !== null) {
-                    history.push({
-                        timestamp: now,
-                        longPercentage: longPercentage / 100,
-                        shortPercentage: shortPercentage / 100,
-                        isMainPoint: true,
-                        isCurrentPoint: true
-                    });
-                }
-            }
+            loadChartData();
 
-            setPositionHistory(history);
-        };
-
-        generatePositionHistory();
-
-        return () => {
-            unsubscribe();
-        };
-    }, [authenticated, marketId, marketService, biddingStartTime, longPercentage, shortPercentage]);
+            return () => {
+                unsubscribe();
+            };
+        });
+    }, [authenticated, marketId, marketService]);
 
     // Function to handle time range changes for charts
     const handleTimeRangeChange = (range: string, chartType: 'price' | 'position') => {

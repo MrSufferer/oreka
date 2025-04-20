@@ -30,6 +30,8 @@ actor Factory {
         createdAt: Timestamp;
         name: Text;
         contractType: ContractType;
+        tradingPair: ?Text;
+        strikePrice: ?Float;
     };
     
     type ContractType = {
@@ -201,7 +203,8 @@ actor Factory {
     public shared(msg) func deployMarket(
         name: Text,
         strike_price: Float,
-        expiry: Nat64
+        expiry: Nat64,
+        trading_pair: Text
     ) : async Result.Result<Principal, Text> {
         let caller = msg.caller;
         
@@ -221,11 +224,17 @@ actor Factory {
             return #err("Expiry must be in the future");
         };
         
+        if (Text.size(trading_pair) == 0) {
+            Debug.print("Error: Trading pair cannot be empty");
+            return #err("Trading pair cannot be empty");
+        };
+        
         try {
             Debug.print("Deploying binary option market with parameters:");
             Debug.print("Name: " # name);
             Debug.print("Strike Price: " # Float.toText(strike_price));
             Debug.print("Expiry: " # Nat64.toText(expiry));
+            Debug.print("Trading Pair: " # trading_pair);
             
             // Check if we have the WASM module cached, if not fetch it
             switch (binaryOptionMarketWasm) {
@@ -286,13 +295,10 @@ actor Factory {
             // Default fee percentage (1%)
             let feePercentage : Nat = 1;
             
-            // Use a default trading pair if not provided
-            let underlying : Text = "BTC";
-            
             Debug.print("Initializing market with parameters:");
             Debug.print("Strike Price: " # Float.toText(strike_price));
             Debug.print("Expiry: " # Nat64.toText(expiry));
-            Debug.print("Trading Pair: " # underlying);
+            Debug.print("Trading Pair: " # trading_pair);
             Debug.print("Fee Percentage: " # Nat.toText(feePercentage));
             
             // For direct initialization, we'll use the canonical constructor arguments
@@ -303,7 +309,7 @@ actor Factory {
                 let initArgs = {
                     strike_price = strike_price;
                     expiry = expiry;
-                    trading_pair = underlying;
+                    trading_pair = trading_pair;
                     fee_percentage = feePercentage;
                 };
                 
@@ -311,7 +317,7 @@ actor Factory {
                 let initArgsBlob = to_candid(
                     strike_price,     // float64
                     expiry,           // nat64
-                    underlying,       // text
+                    trading_pair,     // text
                     feePercentage,    // nat
                     Principal.toText(canister_id),  // canister ID as text
                     "bkyz2-fmaaa-aaaaa-qaaaq-cai",  // ledger ID as text
@@ -357,6 +363,8 @@ actor Factory {
                 createdAt = Nat64.fromNat(Int.abs(Time.now() / 1_000_000_000));
                 name = name;
                 contractType = #BinaryOptionMarket;
+                tradingPair = ?trading_pair;
+                strikePrice = ?strike_price;
             };
             
             Debug.print("Adding contract to global contracts list");
@@ -607,6 +615,8 @@ actor Factory {
                 createdAt = Nat64.fromNat(Int.abs(Time.now() / 1_000_000_000));
                 name = name;
                 contractType = contractType;
+                tradingPair = null;  // Initialize as null for non-market contracts
+                strikePrice = null;  // Initialize as null for non-market contracts
             };
             
             Debug.print("Adding contract to global contracts list");
@@ -679,5 +689,72 @@ actor Factory {
                 };
             };
         };
+    };
+
+    // Function to get all markets with details
+    public query func getAllMarketDetails() : async [{ 
+        canisterId: Principal; 
+        name: Text; 
+        tradingPair: ?Text; 
+        strikePrice: ?Float;
+        expiry: ?Nat64;
+    }] {
+        let marketDetails = Buffer.Buffer<{ 
+            canisterId: Principal; 
+            name: Text; 
+            tradingPair: ?Text; 
+            strikePrice: ?Float;
+            expiry: ?Nat64;
+        }>(0);
+        
+        for (contract in allContracts.vals()) {
+            if (contract.contractType == #BinaryOptionMarket) {
+                marketDetails.add({
+                    canisterId = contract.canisterId;
+                    name = contract.name;
+                    tradingPair = contract.tradingPair;
+                    strikePrice = contract.strikePrice;
+                    expiry = null; // We don't store expiry in contract details currently
+                });
+            };
+        };
+        
+        Buffer.toArray(marketDetails)
+    };
+    
+    // Function to get market details by ID
+    public query func getMarketDetails(canisterId: Principal) : async ?{ 
+        canisterId: Principal; 
+        name: Text; 
+        tradingPair: ?Text; 
+        strikePrice: ?Float;
+        expiry: ?Nat64;
+    } {
+        for (contract in allContracts.vals()) {
+            if (Principal.equal(contract.canisterId, canisterId) and contract.contractType == #BinaryOptionMarket) {
+                return ?{
+                    canisterId = contract.canisterId;
+                    name = contract.name;
+                    tradingPair = contract.tradingPair;
+                    strikePrice = contract.strikePrice;
+                    expiry = null; // We don't store expiry in contract details currently
+                };
+            };
+        };
+        
+        null
+    };
+    
+    // Function to query strike prices for all markets
+    public query func getMarketStrikePrices() : async [(Principal, ?Float)] {
+        let marketStrikePrices = Buffer.Buffer<(Principal, ?Float)>(0);
+        
+        for (contract in allContracts.vals()) {
+            if (contract.contractType == #BinaryOptionMarket) {
+                marketStrikePrices.add((contract.canisterId, contract.strikePrice));
+            };
+        };
+        
+        Buffer.toArray(marketStrikePrices)
     };
 } 

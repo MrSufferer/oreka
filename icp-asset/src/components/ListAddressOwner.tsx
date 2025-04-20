@@ -120,7 +120,7 @@ const formatTimeRemaining = (maturityTime: any) => {
 const getMarketTitle = (contract: ContractData) => {
     try {
         // Format trading pair
-        const pair = contract.tradingPair.replace('/', '-');
+        const pair = contract.tradingPair?.replace('/', '-') || 'Unknown';
 
         // Format maturity time
         const timestamp = Number(contract.maturityTime);
@@ -129,10 +129,15 @@ const getMarketTitle = (contract: ContractData) => {
         const date = new Date(timestamp * 1000);
         const maturityTimeFormatted = format(date, 'MMM d, yyyy h:mm a');
 
-        // Format strike price
+        // Format strike price with appropriate precision based on trading pair
+        let precision = 2;
+        if (pair.includes('BTC')) precision = 0;
+        if (pair.includes('ETH')) precision = 0;
+        if (pair.includes('ICP')) precision = 2;
+
         const strikePriceFormatted = parseFloat(contract.strikePrice).toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
+            minimumFractionDigits: precision,
+            maximumFractionDigits: precision
         });
 
         return `${pair} will reach $${strikePriceFormatted} by ${maturityTimeFormatted} ?`;
@@ -193,7 +198,7 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
         if (marketService) {
             fetchContracts();
         }
-    }, [page, marketService, currentTab]);
+    }, [marketService, currentTab, page]);
 
     // Initialize identity and market service
     const initIdentity = async () => {
@@ -243,6 +248,106 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
         }
     };
 
+    // Get the actual trading pair from a market canister
+    const getMarketTradingPair = async (marketId: string): Promise<string> => {
+        try {
+            console.log(`Getting trading pair for market ${marketId}`);
+
+            // Import dynamically to avoid circular dependencies
+            const { idlFactory } = await import("../declarations/binary_option_market/binary_option_market.did.js");
+            const { getActor } = await import("../service/actor-locator");
+
+            // Get an actor for this specific market canister
+            const marketActor = await getActor(idlFactory, marketId);
+
+            try {
+                // Call the getTradingPair function directly
+                const tradingPair = await marketActor.getTradingPair() as string;
+                console.log(`Market ${marketId} trading pair: ${tradingPair}`);
+
+                // Convert from ICP-USD format to ICP/USD format if needed
+                return tradingPair.replace('-', '/');
+            } catch (error) {
+                console.error(`Error calling getTradingPair for market ${marketId}:`, error);
+
+                // Fallback: try to get trading pair from market details as it might be included there
+                try {
+                    const details = await marketActor.getMarketDetails() as any;
+                    if (details && details.tradingPair) {
+                        const tradingPair = details.tradingPair as string;
+                        console.log(`Got trading pair from market details: ${tradingPair}`);
+                        return tradingPair.replace('-', '/');
+                    }
+                } catch (detailsError) {
+                    console.error(`Error getting market details: ${detailsError}`);
+                }
+
+                return 'ICP/USD'; // Default fallback if both methods fail
+            }
+        } catch (error) {
+            console.error(`Error getting trading pair for market ${marketId}:`, error);
+            return 'ICP/USD'; // Default fallback
+        }
+    };
+
+    // Get the actual strike price from a market canister
+    const getMarketStrikePrice = async (marketId: string): Promise<string> => {
+        try {
+            console.log(`Getting strike price for market ${marketId}`);
+
+            // Import dynamically to avoid circular dependencies
+            const { idlFactory } = await import("../declarations/binary_option_market/binary_option_market.did.js");
+            const { getActor } = await import("../service/actor-locator");
+
+            // Get an actor for this specific market canister
+            const marketActor = await getActor(idlFactory, marketId);
+
+            // Get market details from the canister directly
+            if ('getMarketDetails' in marketActor) {
+                const details = await marketActor.getMarketDetails() as any;
+
+                if (details && details.oracleDetails && details.oracleDetails.strikePrice) {
+                    const strikePrice = Number(details.oracleDetails.strikePrice) / 10e7;
+                    console.log(`Market ${marketId} strike price: ${strikePrice}`);
+                    return strikePrice.toString();
+                }
+            }
+
+            console.log(`Could not get strike price for market ${marketId}, using fallback`);
+            return '0'; // Default fallback
+        } catch (error) {
+            console.error(`Error getting strike price for market ${marketId}:`, error);
+            return '0'; // Default fallback
+        }
+    };
+
+    // Get the actual maturity time from a market canister
+    const getMarketMaturityTime = async (marketId: string): Promise<string> => {
+        try {
+            console.log(`Getting maturity time for market ${marketId}`);
+
+            // Import dynamically to avoid circular dependencies
+            const { idlFactory } = await import("../declarations/binary_option_market/binary_option_market.did.js");
+            const { getActor } = await import("../service/actor-locator");
+
+            // Get an actor for this specific market canister
+            const marketActor = await getActor(idlFactory, marketId);
+
+            // Get the maturity time from the canister directly
+            if ('getEndTimestamp' in marketActor) {
+                const timestamp = await marketActor.getEndTimestamp() as bigint;
+                console.log(`Market ${marketId} maturity time: ${timestamp.toString()}`);
+                return timestamp.toString();
+            }
+
+            console.log(`Could not get maturity time for market ${marketId}, using fallback`);
+            return '0'; // Default fallback
+        } catch (error) {
+            console.error(`Error getting maturity time for market ${marketId}:`, error);
+            return '0'; // Default fallback
+        }
+    };
+
     // Fetch contract list
     const fetchContracts = async () => {
         try {
@@ -275,6 +380,15 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
             const contractDataPromises = paginatedMarkets.map(async (marketId: string, index) => {
                 const marketDetails = await marketService.getMarketDetails(marketId);
 
+                // Get actual trading pair from the market canister
+                const tradingPair = await getMarketTradingPair(marketId);
+
+                // Get actual strike price from the market canister
+                const strikePrice = await getMarketStrikePrice(marketId);
+
+                // Get actual maturity time from the market canister
+                const maturityTime = await getMarketMaturityTime(marketId);
+
                 // Parse phase
                 let phase = Phase.Trading;
                 if (marketDetails.currentPhase && 'Trading' in marketDetails.currentPhase) {
@@ -290,11 +404,11 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                 // Get current price for trading pair if available
                 let currentPrice;
                 try {
-                    if (marketService && marketDetails.tradingPair) {
-                        currentPrice = await marketService.getPrice(marketDetails.tradingPair);
+                    if (marketService && tradingPair) {
+                        currentPrice = await marketService.getPrice(tradingPair);
                     }
                 } catch (error) {
-                    console.error(`Error getting price for ${marketDetails.tradingPair}:`, error);
+                    console.error(`Error getting price for ${tradingPair}:`, error);
                 }
 
                 // Format data for UI with price included
@@ -303,10 +417,10 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                     createDate: marketDetails.createTimestamp ? new Date(Number(marketDetails.createTimestamp) * 1000).toISOString() : '',
                     longAmount: marketDetails.positions ? (Number(marketDetails.positions.long) / 10e7).toString() : '0',
                     shortAmount: marketDetails.positions ? (Number(marketDetails.positions.short) / 10e7).toString() : '0',
-                    strikePrice: marketDetails.oracleDetails ? (Number(marketDetails.oracleDetails.strikePrice) / 10e7).toString() : '0',
+                    strikePrice, // Use the actual strike price from the market canister
                     phase: phase,
-                    maturityTime: marketDetails.endTimestamp ? marketDetails.endTimestamp.toString() : '0',
-                    tradingPair: marketDetails.tradingPair || 'ICP/USD',
+                    maturityTime, // Use the actual maturity time from the market canister
+                    tradingPair,
                     owner: marketDetails.owner ? marketDetails.owner.toString() : '',
                     indexBg: (index % 5 + 1).toString(), // Assign a random image index (1-5)
                     currentPrice: currentPrice
@@ -435,10 +549,9 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
 
     // Get trading pair icon
     const getTradingPairIcon = (tradingPair: string) => {
-        if (tradingPair.includes("BTC")) return SiBitcoinsv;
-        if (tradingPair.includes("ETH")) return FaEthereum;
-        if (tradingPair.includes("ICP")) return GoInfinity;
-        return FaCoins;
+        if (tradingPair.includes('BTC')) return SiBitcoinsv;
+        if (tradingPair.includes('ETH')) return FaEthereum;
+        return GoInfinity; // Default for ICP and others
     };
 
     // Add search functionality
@@ -576,26 +689,24 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                 <HStack spacing={4}>
                     <Box
                         mr="10px"
-                        bg="#1A1C21"
-                        borderRadius="3xl"
-                        border="1px solid transparent"
-                        backgroundImage="linear-gradient(to right, #00B894, #00A8FF)"
-                        boxShadow="0 4px 10px rgba(0, 0, 0, 0.3)"
+                        borderRadius="md"
+                        overflow="hidden"
                     >
                         <Button
                             variant="solid"
                             color="white"
-                            bg="#1A1C21"
-                            borderRadius="3xl"
+                            bgGradient="linear(to-r, #3182CE, #63B3ED)"
+                            borderRadius="md"
                             onClick={() => router.push('/factory')}
                             _hover={{
-                                bg: 'rgba(0, 183, 148, 0.8)',
-                                color: 'white',
+                                bgGradient: "linear(to-r, #2B6CB0, #4299E1)",
                                 transform: 'scale(1.05)',
                             }}
                             _active={{
                                 transform: 'scale(0.95)',
                             }}
+                            boxShadow="0 4px 8px rgba(0, 0, 0, 0.2)"
+                            transition="all 0.2s"
                         >
                             Deploy Markets
                         </Button>
@@ -607,14 +718,14 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                         borderWidth="1px"
                         borderColor="gray.700"
                     >
-                        <Icon as={GoInfinity} color="#FEDF56" />
-                        <Text color="#FEDF56" fontWeight="medium">
+                        <Icon as={GoInfinity} color="#63B3ED" />
+                        <Text color="#63B3ED" fontWeight="medium">
                             {parseFloat(balance).toFixed(4)} ICP
                         </Text>
                     </HStack>
                     <Button
                         leftIcon={<FaWallet />}
-                        colorScheme="yellow"
+                        colorScheme="blue"
                         variant="outline"
                         size="md"
                     >
@@ -636,7 +747,7 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                                 height: '8px',
                             },
                             '&::-webkit-scrollbar-thumb': {
-                                backgroundColor: 'rgba(254,223,86,0.2)',
+                                backgroundColor: 'rgba(100,149,237,0.2)',
                                 borderRadius: '4px',
                             }
                         }}
@@ -648,7 +759,7 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                                     key={tab}
                                     size="md"
                                     variant={currentTab === tab ? "solid" : "ghost"}
-                                    colorScheme={currentTab === tab ? "yellow" : "gray"}
+                                    colorScheme={currentTab === tab ? "blue" : "gray"}
                                     onClick={() => setCurrentTab(tab)}
                                     minW="120px"
                                     leftIcon={
@@ -660,11 +771,17 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                                                             tab === 'ETH/USD' ? <FaEthereum /> :
                                                                 <GoInfinity />
                                     }
-                                    color={currentTab === tab ? "#1A202C" : "#FEDF56"}
+                                    color={currentTab === tab ? "white" : "gray.300"}
+                                    bgImage={currentTab === tab ? "linear-gradient(135deg, #3182CE, #63B3ED)" : "none"}
+                                    backgroundColor={currentTab === tab ? "transparent" : "transparent"}
                                     _hover={{
-                                        bg: currentTab === tab ? "#FEDF56" : "rgba(254,223,86,0.1)",
-                                        color: currentTab === tab ? "#1A202C" : "#FEDF56"
+                                        bgImage: currentTab === tab ? "linear-gradient(135deg, #3182CE, #63B3ED)" : "none",
+                                        backgroundColor: currentTab === tab ? "transparent" : "rgba(99,179,237,0.1)",
+                                        color: currentTab === tab ? "white" : "gray.300"
                                     }}
+                                    borderRadius="md"
+                                    boxShadow={currentTab === tab ? "md" : "none"}
+                                    transition="all 0.2s"
                                 >
                                     {tab}
                                 </Button>
