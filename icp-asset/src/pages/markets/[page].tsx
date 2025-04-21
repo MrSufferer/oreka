@@ -90,7 +90,7 @@ export default function MarketsPage() {
 
     return (
         <div className="container mx-auto px-4 py-8">
-            <ListAddressOwner principal={principal} page={page ? Number(page) : 1} />
+            <ListAddressOwner ownerAddress={principal} page={page ? Number(page) : 1} />
         </div>
     );
 } 

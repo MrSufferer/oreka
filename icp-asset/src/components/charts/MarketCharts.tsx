@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Box, Tabs, TabList, TabPanels, Tab, TabPanel, HStack, Button, Text, ButtonGroup, Flex, Skeleton } from '@chakra-ui/react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { Box, Tabs, TabList, TabPanels, Tab, TabPanel, HStack, Button, Text, ButtonGroup, Flex, Skeleton, Tooltip as ChakraTooltip } from '@chakra-ui/react';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, AreaChart, Area } from 'recharts';
 import { PriceService } from '../../service/price-service';
 import { format, subDays } from 'date-fns';
@@ -54,8 +54,34 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
     const [localChartData, setLocalChartData] = useState<any[]>([]);
     const [effectiveChartSymbol, setEffectiveChartSymbol] = useState<string>(chartSymbol || 'ETH-USD');
     const [hoverData, setHoverData] = useState<any>(null);
+    const [enhancedPositionData, setEnhancedPositionData] = useState<PositionPoint[]>([]);
     const initialLoadRef = useRef<boolean>(true);
     const priceServiceRef = useRef(PriceService.getInstance());
+    const positionHistoryRef = useRef<PositionPoint[]>([]);
+    const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    const animationFrameRef = useRef<number | null>(null);
+
+    // Set default bidding start time if not provided
+    const effectiveBiddingStartTime = useMemo(() => {
+        if (!biddingStartTime || biddingStartTime <= 0) {
+            // Default to 24 hours ago if not provided
+            console.log("Using default bidding start time");
+            return Math.floor(Date.now() / 1000) - 86400;
+        }
+        console.log("Using actual bidding start time:", biddingStartTime);
+        return biddingStartTime;
+    }, [biddingStartTime]);
+
+    // Set default maturity time if not provided
+    const effectiveMaturityTime = useMemo(() => {
+        if (!maturityTime || maturityTime <= 0) {
+            // Default to 24 hours from now if not provided
+            console.log("Using default maturity time");
+            return Math.floor(Date.now() / 1000) + 86400;
+        }
+        console.log("Using actual maturity time:", maturityTime);
+        return maturityTime;
+    }, [maturityTime]);
 
     // Initialize chart data
     useEffect(() => {
@@ -75,13 +101,73 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
 
         loadChartData();
 
-        // Update current time periodically
-        const interval = setInterval(() => {
-            setCurrentTime(Math.floor(Date.now() / 1000));
-        }, 1000);
-
-        return () => clearInterval(interval);
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+            }
+        };
     }, [chartType, effectiveChartSymbol]);
+
+    // Effect to update current time at regular intervals for real-time position tracking
+    useEffect(() => {
+        const updateTime = () => {
+            const now = Math.floor(Date.now() / 1000);
+            if (now <= effectiveMaturityTime) {
+                setCurrentTime(now);
+                animationFrameRef.current = requestAnimationFrame(updateTime);
+            }
+        };
+
+        animationFrameRef.current = requestAnimationFrame(updateTime);
+
+        return () => {
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+            }
+        };
+    }, [effectiveMaturityTime]);
+
+    // Process and filter position history data based on current time
+    useEffect(() => {
+        if (!positionHistory || !effectiveBiddingStartTime || !effectiveMaturityTime) {
+            return;
+        }
+
+        // Throttled update function to prevent excessive re-renders
+        const throttledUpdate = () => {
+            if (positionHistory.length > 0) {
+                // Filter position history to only show data up to current time
+                positionHistoryRef.current = positionHistory.filter(point =>
+                    point.timestamp <= currentTime
+                );
+            }
+
+            // Generate enhanced data with interpolated points for smoother charts
+            const enhancedData = generateEnhancedPositionData(
+                positionHistoryRef.current,
+                effectiveBiddingStartTime,
+                effectiveMaturityTime,
+                currentTime,
+                positions
+            );
+
+            setEnhancedPositionData(enhancedData);
+        };
+
+        throttledUpdate();
+
+        // Update position visualization every 500ms
+        intervalRef.current = setInterval(throttledUpdate, 500);
+
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+        };
+    }, [positionHistory, effectiveBiddingStartTime, effectiveMaturityTime, currentTime, positions]);
 
     // Update chart symbol if needed
     useEffect(() => {
@@ -103,6 +189,23 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
         return ticks;
     };
 
+    // Generate tick marks for position chart x-axis
+    const getPositionChartTicks = () => {
+        if (!effectiveBiddingStartTime || !effectiveMaturityTime) return [];
+
+        // Calculate time interval between ticks
+        const duration = effectiveMaturityTime - effectiveBiddingStartTime;
+        const interval = Math.max(Math.floor(duration / 5), 1);
+        const ticks = [];
+
+        // Create evenly spaced ticks
+        for (let i = 0; i <= 5; i++) {
+            ticks.push(effectiveBiddingStartTime + (i * interval));
+        }
+
+        return ticks;
+    };
+
     // Format price chart x-axis tick labels as dates
     const formatPriceXAxisTick = (timestamp: number) => {
         return format(new Date(timestamp), 'dd/MM');
@@ -113,6 +216,78 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
         const date = new Date(timestamp * 1000);
         return format(date, 'HH:mm dd/MM');
     };
+
+    // Generate enhanced position data for smoother chart visualization
+    const generateEnhancedPositionData = useCallback((
+        originalData: PositionPoint[],
+        biddingStart: number,
+        maturityEnd: number,
+        current: number,
+        currentPositions: Position
+    ): PositionPoint[] => {
+        if (current < biddingStart) {
+            return [{
+                timestamp: biddingStart,
+                longPercentage: 50,
+                shortPercentage: 50,
+                isMainPoint: false
+            }];
+        }
+
+        let result: PositionPoint[] = [];
+
+        // Add initial point at bidding start
+        result.push({
+            timestamp: biddingStart,
+            longPercentage: 50,
+            shortPercentage: 50,
+            isMainPoint: false
+        });
+
+        if (originalData && originalData.length > 0) {
+            const filteredPoints = originalData
+                .filter(point => Math.abs(point.timestamp - biddingStart) > 10)
+                .map(point => ({
+                    ...point,
+                    isMainPoint: false,
+                    isCurrentPoint: false
+                }));
+
+            result = [...result, ...filteredPoints];
+        }
+
+        let currentLongPercentage = 50;
+        let currentShortPercentage = 50;
+
+        if (currentPositions && (currentPositions.long > 0 || currentPositions.short > 0)) {
+            const total = currentPositions.long + currentPositions.short;
+            currentLongPercentage = total > 0 ? Math.round((currentPositions.long / total) * 100) : 50;
+            currentShortPercentage = total > 0 ? Math.round((currentPositions.short / total) * 100) : 50;
+        }
+
+        if (current > biddingStart && current <= maturityEnd) {
+            result.push({
+                timestamp: current,
+                longPercentage: currentLongPercentage,
+                shortPercentage: currentShortPercentage,
+                isMainPoint: true,
+                isCurrentPoint: true
+            });
+        }
+        if (current >= maturityEnd) {
+            result.push({
+                timestamp: maturityEnd,
+                longPercentage: currentLongPercentage,
+                shortPercentage: currentShortPercentage,
+                isMainPoint: true,
+                isCurrentPoint: false
+            });
+        }
+
+        result.sort((a, b) => a.timestamp - b.timestamp);
+
+        return result;
+    }, []);
 
     // Custom tooltip for price chart
     const CustomTooltip = ({ active, payload, label }: any) => {
@@ -138,7 +313,34 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
         return null;
     };
 
-    // Handle mouse hover on chart
+    // Custom tooltip for position chart
+    const PositionChartTooltip = useCallback(({ active, payload, label }: any) => {
+        if (active && payload && payload.length) {
+            const time = format(new Date(label * 1000), 'HH:mm:ss dd/MM/yyyy');
+            const longPercentage = payload[0].value;
+            const shortPercentage = payload[1].value;
+
+            return (
+                <Box bg="rgba(0,0,0,0.8)" p={2} borderRadius="md" boxShadow="md">
+                    <Text color="gray.300" fontSize="sm">{time}</Text>
+                    <HStack spacing={4} mt={1}>
+                        <HStack>
+                            <Box w={2} h={2} borderRadius="full" bg="#00D7B5" />
+                            <Text color="#00D7B5" fontWeight="bold">{`LONG: ${longPercentage}%`}</Text>
+                        </HStack>
+                        <HStack>
+                            <Box w={2} h={2} borderRadius="full" bg="#FF6384" />
+                            <Text color="#FF6384" fontWeight="bold">{`SHORT: ${shortPercentage}%`}</Text>
+                        </HStack>
+                    </HStack>
+                </Box>
+            );
+        }
+
+        return null;
+    }, []);
+
+    // Handle mouse movement over chart to update hover data
     const handleMouseMove = (e: any) => {
         if (e && e.activePayload && e.activePayload.length) {
             setHoverData(e.activePayload[0].payload);
@@ -149,6 +351,23 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
     const handleMouseLeave = () => {
         setHoverData(null);
     };
+
+    // Custom dot renderer for position chart
+    const renderPositionDot = useCallback(({ cx, cy, payload, dataKey }: any) => {
+        if (payload.isCurrentPoint) {
+            const color = dataKey === 'longPercentage' ? '#00D7B5' : '#FF6384';
+            const size = 6;
+
+            return (
+                <svg x={cx - size} y={cy - size} width={size * 2} height={size * 2}>
+                    <circle cx={size} cy={size} r={size} fill={color} />
+                    <circle cx={size} cy={size} r={size - 1} fill={color} stroke="#fff" strokeWidth={1} />
+                </svg>
+            );
+        }
+
+        return null;
+    }, []);
 
     // Optimize price chart data
     const optimizedPriceData = useMemo(() => {
@@ -215,14 +434,18 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
 
     // Render position chart
     const renderPositionChart = () => {
-        const positionData = positionHistory.map(point => ({
-            ...point,
-            timestamp: point.timestamp * 1000 // Convert to milliseconds for chart
-        }));
+        let longPercentage = 50;
+        let shortPercentage = 50;
+
+        if (positions && (positions.long > 0 || positions.short > 0)) {
+            const total = positions.long + positions.short;
+            longPercentage = total > 0 ? Math.round((positions.long / total) * 100) : 50;
+            shortPercentage = total > 0 ? Math.round((positions.short / total) * 100) : 50;
+        }
 
         return (
             <Box height="350px" position="relative">
-                {positionData.length === 0 ? (
+                {enhancedPositionData.length === 0 ? (
                     <Flex
                         height="100%"
                         alignItems="center"
@@ -235,55 +458,48 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
                     </Flex>
                 ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart
-                            data={positionData}
+                        <LineChart
+                            data={enhancedPositionData}
                             margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                            onMouseMove={handleMouseMove}
+                            onMouseLeave={handleMouseLeave}
                         >
-                            <defs>
-                                <linearGradient id="colorLong" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#00ff87" stopOpacity={0.8} />
-                                    <stop offset="95%" stopColor="#0f0c29" stopOpacity={0.2} />
-                                </linearGradient>
-                                <linearGradient id="colorShort" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#ff416c" stopOpacity={0.8} />
-                                    <stop offset="95%" stopColor="#ff4b2b" stopOpacity={0.2} />
-                                </linearGradient>
-                            </defs>
                             <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                             <XAxis
                                 dataKey="timestamp"
-                                domain={['auto', 'auto']}
+                                domain={[effectiveBiddingStartTime, effectiveMaturityTime]}
                                 name="Time"
                                 tickFormatter={formatPositionXAxisTick}
-                                ticks={getPriceChartTicks()}
+                                ticks={getPositionChartTicks()}
                                 type="number"
                                 stroke="#666"
                             />
                             <YAxis
-                                tickFormatter={(value) => `${(value * 100).toFixed(0)}%`}
-                                domain={[0, 1]}
+                                domain={[0, 100]}
+                                tickCount={5}
+                                tickFormatter={(value) => `${value}%`}
                                 stroke="#666"
                             />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Area
+                            <Tooltip content={<PositionChartTooltip />} />
+                            <Line
                                 type="monotone"
                                 dataKey="longPercentage"
-                                stackId="1"
-                                stroke="#00ff87"
-                                fill="url(#colorLong)"
-                                fillOpacity={0.8}
-                                name="Long"
+                                stroke="#00D7B5"
+                                strokeWidth={2}
+                                dot={renderPositionDot}
+                                activeDot={{ r: 6, stroke: '#00D7B5', strokeWidth: 2 }}
+                                name="LONG"
                             />
-                            <Area
+                            <Line
                                 type="monotone"
                                 dataKey="shortPercentage"
-                                stackId="1"
-                                stroke="#ff416c"
-                                fill="url(#colorShort)"
-                                fillOpacity={0.8}
-                                name="Short"
+                                stroke="#FF6384"
+                                strokeWidth={2}
+                                dot={renderPositionDot}
+                                activeDot={{ r: 6, stroke: '#FF6384', strokeWidth: 2 }}
+                                name="SHORT"
                             />
-                        </AreaChart>
+                        </LineChart>
                     </ResponsiveContainer>
                 )}
             </Box>

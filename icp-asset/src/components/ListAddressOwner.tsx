@@ -77,10 +77,26 @@ const getPhaseName = (phase: number) => {
 const formatMaturityTime = (maturityTime: any) => {
     try {
         if (!maturityTime) return "Unknown";
-        const timestamp = Number(maturityTime);
-        if (isNaN(timestamp) || timestamp === 0) return "Unknown";
-        const date = new Date(timestamp * 1000);
-        return format(date, 'MMM d, yyyy h:mm a');
+
+        // Check if we have a large timestamp (nanoseconds/microseconds)
+        let timestamp = Number(maturityTime);
+        if (isNaN(timestamp)) return "Unknown";
+
+        // Convert to milliseconds if needed
+        if (timestamp > 1e15) { // Likely nanoseconds
+            timestamp = Math.floor(timestamp / 1e6); // Convert nanoseconds to milliseconds
+        } else if (timestamp > 1e12) { // Likely microseconds
+            timestamp = Math.floor(timestamp / 1e3); // Convert microseconds to milliseconds
+        } else if (timestamp < 1e10) { // Likely seconds
+            timestamp = timestamp * 1000; // Convert seconds to milliseconds
+        }
+
+        // Validate range
+        if (timestamp <= 0) return "Unknown";
+        const year = new Date(timestamp).getFullYear();
+        if (year < 2020 || year > 2050) return "Invalid date";
+
+        return format(new Date(timestamp), 'MMM d, yyyy h:mm a');
     } catch (error) {
         console.error("Error formatting maturity time:", error);
         return "Unknown";
@@ -91,7 +107,26 @@ const formatMaturityTime = (maturityTime: any) => {
 const isMarketEnded = (maturityTime: any, phase: number): boolean => {
     try {
         if (!maturityTime) return false;
-        const maturityDate = new Date(Number(maturityTime) * 1000);
+
+        // Check if we have a large timestamp (nanoseconds/microseconds)
+        let timestamp = Number(maturityTime);
+        if (isNaN(timestamp)) return false;
+
+        // Convert to milliseconds if needed
+        if (timestamp > 1e15) { // Likely nanoseconds
+            timestamp = Math.floor(timestamp / 1e6); // Convert nanoseconds to milliseconds
+        } else if (timestamp > 1e12) { // Likely microseconds
+            timestamp = Math.floor(timestamp / 1e3); // Convert microseconds to milliseconds
+        } else if (timestamp < 1e10) { // Likely seconds
+            timestamp = timestamp * 1000; // Convert seconds to milliseconds
+        }
+
+        // Validate range
+        if (timestamp <= 0) return false;
+        const year = new Date(timestamp).getFullYear();
+        if (year < 2020 || year > 2050) return false;
+
+        const maturityDate = new Date(timestamp);
         const currentTime = new Date();
         return currentTime.getTime() > maturityDate.getTime();
     } catch (error) {
@@ -104,12 +139,38 @@ const isMarketEnded = (maturityTime: any, phase: number): boolean => {
 const formatTimeRemaining = (maturityTime: any) => {
     try {
         if (!maturityTime) return "Unknown";
-        const maturityDate = new Date(Number(maturityTime) * 1000);
+
+        // Check if we have a large timestamp (nanoseconds/microseconds)
+        let timestamp = Number(maturityTime);
+        if (isNaN(timestamp)) return "Unknown";
+
+        // Convert to milliseconds if needed
+        if (timestamp > 1e15) { // Likely nanoseconds
+            timestamp = Math.floor(timestamp / 1e6); // Convert nanoseconds to milliseconds
+        } else if (timestamp > 1e12) { // Likely microseconds
+            timestamp = Math.floor(timestamp / 1e3); // Convert microseconds to milliseconds
+        } else if (timestamp < 1e10) { // Likely seconds
+            timestamp = timestamp * 1000; // Convert seconds to milliseconds
+        }
+
+        // Validate range
+        if (timestamp <= 0) return "Unknown";
+        const year = new Date(timestamp).getFullYear();
+        if (year < 2020 || year > 2050) return "Invalid date";
+
+        const maturityDate = new Date(timestamp);
         const currentTime = new Date();
         if (currentTime > maturityDate) {
             return "Ended";
         }
-        return formatDistanceToNow(maturityDate, { addSuffix: true });
+
+        // Safely format the date with error handling
+        try {
+            return formatDistanceToNow(maturityDate, { addSuffix: true });
+        } catch (formatError) {
+            console.warn(`Could not format date: ${timestamp}`, formatError);
+            return "Unknown";
+        }
     } catch (error) {
         console.error("Error formatting time remaining:", error);
         return "Unknown";
@@ -122,12 +183,35 @@ const getMarketTitle = (contract: ContractData) => {
         // Format trading pair
         const pair = contract.tradingPair?.replace('/', '-') || 'Unknown';
 
-        // Format maturity time
-        const timestamp = Number(contract.maturityTime);
-        if (isNaN(timestamp) || timestamp === 0) return `${pair} Market`;
+        // Handle the timestamp - check for different time formats
+        let timestamp = Number(contract.maturityTime);
+        if (isNaN(timestamp) || timestamp <= 0) return `${pair} Market`;
 
-        const date = new Date(timestamp * 1000);
-        const maturityTimeFormatted = format(date, 'MMM d, yyyy h:mm a');
+        // Convert to milliseconds if needed
+        if (timestamp > 1e15) { // Likely nanoseconds
+            timestamp = Math.floor(timestamp / 1e6); // Convert nanoseconds to milliseconds
+            console.log(`Converting large timestamp ${contract.maturityTime} to milliseconds: ${timestamp}`);
+        } else if (timestamp > 1e12) { // Likely microseconds
+            timestamp = Math.floor(timestamp / 1e3); // Convert microseconds to milliseconds
+        } else if (timestamp < 1e10) { // Likely seconds
+            timestamp = timestamp * 1000; // Convert seconds to milliseconds
+        }
+
+        // Validate timestamp is within reasonable range
+        const year = new Date(timestamp).getFullYear();
+        if (year < 2020 || year > 2050) {
+            console.warn(`Timestamp out of reasonable range: ${timestamp}, year: ${year}`);
+            return `${pair} Market`;
+        }
+
+        // Safely format the date
+        let maturityTimeFormatted;
+        try {
+            maturityTimeFormatted = format(new Date(timestamp), 'MMM d, yyyy h:mm a');
+        } catch (formatError) {
+            console.warn(`Could not format maturity date: ${timestamp}`, formatError);
+            return `${pair} Market`;
+        }
 
         // Format strike price with appropriate precision based on trading pair
         let precision = 2;
@@ -135,7 +219,10 @@ const getMarketTitle = (contract: ContractData) => {
         if (pair.includes('ETH')) precision = 0;
         if (pair.includes('ICP')) precision = 2;
 
-        const strikePriceFormatted = parseFloat(contract.strikePrice).toLocaleString('en-US', {
+        const strikePriceVal = parseFloat(contract.strikePrice);
+        if (isNaN(strikePriceVal)) return `${pair} Market`;
+
+        const strikePriceFormatted = strikePriceVal.toLocaleString('en-US', {
             minimumFractionDigits: precision,
             maximumFractionDigits: precision
         });
@@ -360,10 +447,13 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                 return;
             }
 
+            console.log("Fetching all markets via BinaryOptionMarketService...");
             // Get all markets from the market service
             const allMarkets = await marketService.getAllMarkets();
+            console.log(`Got ${allMarkets ? allMarkets.length : 0} markets from market service:`, allMarkets);
 
             if (!allMarkets || allMarkets.length === 0) {
+                console.log("No markets found, setting empty contracts list");
                 setContracts([]);
                 setTotalContracts(0);
                 setTotalPages(1);
@@ -375,10 +465,14 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
             const startIdx = (page - 1) * CONTRACTS_PER_PAGE;
             const endIdx = startIdx + CONTRACTS_PER_PAGE;
             const paginatedMarkets = allMarkets.slice(startIdx, endIdx);
+            console.log(`Showing markets ${startIdx + 1}-${Math.min(endIdx, allMarkets.length)} of ${allMarkets.length}`);
 
             // Transform market data
+            console.log("Fetching details for each market in the current page");
             const contractDataPromises = paginatedMarkets.map(async (marketId: string, index) => {
+                console.log(`Fetching details for market ID: ${marketId}`);
                 const marketDetails = await marketService.getMarketDetails(marketId);
+                console.log(`Market details for ${marketId}:`, marketDetails);
 
                 // Get actual trading pair from the market canister
                 const tradingPair = await getMarketTradingPair(marketId);
@@ -406,13 +500,14 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                 try {
                     if (marketService && tradingPair) {
                         currentPrice = await marketService.getPrice(tradingPair);
+                        console.log(`Current price for ${tradingPair}: ${currentPrice}`);
                     }
                 } catch (error) {
                     console.error(`Error getting price for ${tradingPair}:`, error);
                 }
 
                 // Format data for UI with price included
-                return {
+                const contractData: ContractData = {
                     address: marketId,
                     createDate: marketDetails.createTimestamp ? new Date(Number(marketDetails.createTimestamp) * 1000).toISOString() : '',
                     longAmount: marketDetails.positions ? (Number(marketDetails.positions.long) / 10e7).toString() : '0',
@@ -425,65 +520,75 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                     indexBg: (index % 5 + 1).toString(), // Assign a random image index (1-5)
                     currentPrice: currentPrice
                 };
+
+                console.log(`Formatted contract data for ${marketId}:`, contractData);
+                return contractData;
             });
 
-            const contractDataList = await Promise.all(contractDataPromises);
+            try {
+                const contractDataList: ContractData[] = await Promise.all(contractDataPromises);
+                console.log("All market details fetched successfully:", contractDataList);
 
-            // Filter contracts based on current tab
-            const filteredContractList = contractDataList.filter(contract => {
-                if (currentTab === 'All Markets') return true;
-                if (currentTab === 'Most recent') return true; // Will be sorted later
-                if (currentTab === 'Quests') return contract.phase === Phase.Trading || contract.phase === Phase.Bidding;
-                if (currentTab === 'Results') return contract.phase === Phase.Maturity || contract.phase === Phase.Expiry;
-                return contract.tradingPair === currentTab; // Filter by trading pair
-            });
-
-            // Sort by creation date if "Most recent" tab
-            if (currentTab === 'Most recent') {
-                filteredContractList.sort((a, b) => {
-                    return new Date(b.createDate).getTime() - new Date(a.createDate).getTime();
+                // Filter contracts based on current tab
+                const filteredContractList = contractDataList.filter((contract: ContractData) => {
+                    if (currentTab === 'All Markets') return true;
+                    if (currentTab === 'Most recent') return true; // Will be sorted later
+                    if (currentTab === 'Quests') return contract.phase === Phase.Trading || contract.phase === Phase.Bidding;
+                    if (currentTab === 'Results') return contract.phase === Phase.Maturity || contract.phase === Phase.Expiry;
+                    return contract.tradingPair === currentTab; // Filter by trading pair
                 });
-            }
 
-            setContracts(filteredContractList);
-            setTotalContracts(allMarkets.length);
-            setTotalPages(Math.ceil(allMarkets.length / CONTRACTS_PER_PAGE));
-
-            // Calculate percentages for each contract
-            const newPercentages: { [key: string]: { long: number, short: number } } = {};
-            filteredContractList.forEach(contract => {
-                const longAmount = parseFloat(contract.longAmount || '0');
-                const shortAmount = parseFloat(contract.shortAmount || '0');
-                const total = longAmount + shortAmount;
-
-                if (total > 0) {
-                    const longPercent = (longAmount / total) * 100;
-                    const shortPercent = (shortAmount / total) * 100;
-
-                    newPercentages[contract.address] = {
-                        long: longPercent,
-                        short: shortPercent
-                    };
-                } else {
-                    // Default to 50/50 if no amounts are present
-                    newPercentages[contract.address] = {
-                        long: 50,
-                        short: 50
-                    };
+                // Sort by creation date if "Most recent" tab
+                if (currentTab === 'Most recent') {
+                    filteredContractList.sort((a: ContractData, b: ContractData) => {
+                        return new Date(b.createDate).getTime() - new Date(a.createDate).getTime();
+                    });
                 }
-            });
-            setContractPercentages(newPercentages);
 
-            // Set image indices for contracts
-            const newImageIndices: { [key: string]: number } = {};
-            filteredContractList.forEach(contract => {
-                const bgIndex = contract.indexBg ? parseInt(contract.indexBg) : 1;
-                newImageIndices[contract.address] = bgIndex;
-            });
-            setContractImageIndices(newImageIndices);
+                console.log(`Setting ${filteredContractList.length} contracts after filtering by tab '${currentTab}'`);
+                setContracts(filteredContractList);
+                setTotalContracts(allMarkets.length);
+                setTotalPages(Math.ceil(allMarkets.length / CONTRACTS_PER_PAGE));
 
-            // Start countdown timers
-            updateCountdowns(filteredContractList);
+                // Calculate percentages for each contract
+                const newPercentages: { [key: string]: { long: number, short: number } } = {};
+                filteredContractList.forEach((contract: ContractData) => {
+                    const longAmount = parseFloat(contract.longAmount || '0');
+                    const shortAmount = parseFloat(contract.shortAmount || '0');
+                    const total = longAmount + shortAmount;
+
+                    if (total > 0) {
+                        const longPercent = (longAmount / total) * 100;
+                        const shortPercent = (shortAmount / total) * 100;
+
+                        newPercentages[contract.address] = {
+                            long: longPercent,
+                            short: shortPercent
+                        };
+                    } else {
+                        // Default to 50/50 if no amounts are present
+                        newPercentages[contract.address] = {
+                            long: 50,
+                            short: 50
+                        };
+                    }
+                });
+                setContractPercentages(newPercentages);
+
+                // Set image indices for contracts
+                const newImageIndices: { [key: string]: number } = {};
+                filteredContractList.forEach((contract: ContractData) => {
+                    const bgIndex = contract.indexBg ? parseInt(contract.indexBg) : 1;
+                    newImageIndices[contract.address] = bgIndex;
+                });
+                setContractImageIndices(newImageIndices);
+
+                // Start countdown timers
+                updateCountdowns(filteredContractList);
+            } catch (detailsError) {
+                console.error("Error processing market details:", detailsError);
+                setError("Failed to process market details. Please try again.");
+            }
 
             setIsLoading(false);
         } catch (error) {
@@ -498,14 +603,48 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
         const newCountdowns: { [key: string]: string } = {};
 
         contracts.forEach(contract => {
-            const timestamp = Number(contract.maturityTime);
-            if (!isNaN(timestamp) && timestamp > 0) {
-                if (isTimestampPassed(timestamp)) {
-                    newCountdowns[contract.address] = "Ended";
-                } else {
-                    newCountdowns[contract.address] = formatTimeRemaining(timestamp);
+            try {
+                let timestamp = Number(contract.maturityTime);
+                if (isNaN(timestamp)) {
+                    newCountdowns[contract.address] = "Unknown";
+                    return;
                 }
-            } else {
+
+                // Convert to milliseconds if needed
+                if (timestamp > 1e15) { // Likely nanoseconds
+                    timestamp = Math.floor(timestamp / 1e6); // Convert nanoseconds to milliseconds
+                } else if (timestamp > 1e12) { // Likely microseconds
+                    timestamp = Math.floor(timestamp / 1e3); // Convert microseconds to milliseconds
+                } else if (timestamp < 1e10) { // Likely seconds
+                    timestamp = timestamp * 1000; // Convert seconds to milliseconds
+                }
+
+                if (timestamp <= 0) {
+                    newCountdowns[contract.address] = "Unknown";
+                    return;
+                }
+
+                // Validate timestamp is within reasonable range
+                const year = new Date(timestamp).getFullYear();
+                if (year < 2020 || year > 2050) {
+                    newCountdowns[contract.address] = "Invalid date";
+                } else {
+                    // Check if time has passed
+                    const maturityDate = new Date(timestamp);
+                    const currentTime = new Date();
+                    if (currentTime > maturityDate) {
+                        newCountdowns[contract.address] = "Ended";
+                    } else {
+                        try {
+                            newCountdowns[contract.address] = formatDistanceToNow(maturityDate, { addSuffix: true });
+                        } catch (formatError) {
+                            console.warn(`Error formatting countdown: ${formatError}`);
+                            newCountdowns[contract.address] = "Unknown";
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn(`Error setting countdown for contract ${contract.address}:`, error);
                 newCountdowns[contract.address] = "Unknown";
             }
         });
@@ -517,14 +656,48 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
             const updatedCountdowns: { [key: string]: string } = {};
 
             contracts.forEach(contract => {
-                const timestamp = Number(contract.maturityTime);
-                if (!isNaN(timestamp) && timestamp > 0) {
-                    if (isTimestampPassed(timestamp)) {
-                        updatedCountdowns[contract.address] = "Ended";
-                    } else {
-                        updatedCountdowns[contract.address] = formatTimeRemaining(timestamp);
+                try {
+                    let timestamp = Number(contract.maturityTime);
+                    if (isNaN(timestamp)) {
+                        updatedCountdowns[contract.address] = "Unknown";
+                        return;
                     }
-                } else {
+
+                    // Convert to milliseconds if needed
+                    if (timestamp > 1e15) { // Likely nanoseconds
+                        timestamp = Math.floor(timestamp / 1e6); // Convert nanoseconds to milliseconds
+                    } else if (timestamp > 1e12) { // Likely microseconds
+                        timestamp = Math.floor(timestamp / 1e3); // Convert microseconds to milliseconds
+                    } else if (timestamp < 1e10) { // Likely seconds
+                        timestamp = timestamp * 1000; // Convert seconds to milliseconds
+                    }
+
+                    if (timestamp <= 0) {
+                        updatedCountdowns[contract.address] = "Unknown";
+                        return;
+                    }
+
+                    // Validate timestamp is within reasonable range
+                    const year = new Date(timestamp).getFullYear();
+                    if (year < 2020 || year > 2050) {
+                        updatedCountdowns[contract.address] = "Invalid date";
+                    } else {
+                        // Check if time has passed
+                        const maturityDate = new Date(timestamp);
+                        const currentTime = new Date();
+                        if (currentTime > maturityDate) {
+                            updatedCountdowns[contract.address] = "Ended";
+                        } else {
+                            try {
+                                updatedCountdowns[contract.address] = formatDistanceToNow(maturityDate, { addSuffix: true });
+                            } catch (formatError) {
+                                console.warn(`Error formatting countdown: ${formatError}`);
+                                updatedCountdowns[contract.address] = "Unknown";
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Error updating countdown for contract ${contract.address}:`, error);
                     updatedCountdowns[contract.address] = "Unknown";
                 }
             });
@@ -543,7 +716,9 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
     // Handle pagination
     const handlePageChange = (newPage: number) => {
         if (newPage >= 1 && newPage <= totalPages) {
-            router.push(`/listaddress/${newPage}`);
+            // Get the current route (either 'markets' or 'listaddress')
+            const currentRoute = router.pathname.includes('/markets') ? 'markets' : 'listaddress';
+            router.push(`/${currentRoute}/${newPage}`);
         }
     };
 

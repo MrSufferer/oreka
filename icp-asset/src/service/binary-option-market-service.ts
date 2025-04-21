@@ -160,21 +160,51 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
 
         try {
             // If marketId is provided, get details for specific market
-            if (marketId) {
+            if (marketId && marketId !== process.env.NEXT_PUBLIC_BINARY_OPTION_MARKET_CANISTER_ID) {
                 console.log("DEBUG: getMarketDetails for specific market ID:", marketId);
-                // This is a mock implementation until backend support is added
-                // Return mock data for now that matches the structure needed
-                return {
-                    resolved: false,
-                    oracleDetails: { finalPrice: 0, strikePrice: 100000000 }, // Example value (1 USD with 8 decimals)
-                    positions: { long: BigInt(0), short: BigInt(0) },
-                    tradingPair: "ICP/USD",
-                    // Set the owner to current user to ensure admin buttons show
-                    owner: await this.getCurrentUserPrincipal(),
-                    currentPhase: { Trading: null },
-                    createTimestamp: BigInt(Math.floor(Date.now() / 1000) - 86400), // 1 day ago
-                    endTimestamp: BigInt(Math.floor(Date.now() / 1000) + 86400) // 1 day from now
-                };
+
+                try {
+                    // Import dynamically to avoid circular dependencies
+                    const { idlFactory } = await import("../declarations/binary_option_market/binary_option_market.did.js");
+                    const { getActor } = await import("./actor-locator");
+
+                    // Get actor for this specific market canister
+                    const marketActor = await getActor(idlFactory, marketId);
+
+                    // Get actual market details from this canister
+                    const marketDetails: any = await marketActor.getMarketDetails();
+                    console.log("DEBUG: Raw market details from specific canister:", marketDetails);
+
+                    // Get trading pair directly from the canister
+                    let tradingPair: string;
+                    try {
+                        const rawPair = await marketActor.getTradingPair() as string;
+                        tradingPair = rawPair.replace('-', '/'); // Convert from SOL-USD to SOL/USD format
+                    } catch (error) {
+                        console.error("Error getting trading pair, using default:", error);
+                        tradingPair = "ICP/USD"; // Fallback
+                    }
+
+                    // If owner is missing but we need admin privileges, set owner to current user
+                    if (!marketDetails.owner) {
+                        marketDetails.owner = await this.getCurrentUserPrincipal();
+                    }
+
+                    // Return market details with added trading pair
+                    return {
+                        resolved: marketDetails.resolved || false,
+                        oracleDetails: marketDetails.oracleDetails || { finalPrice: 0, strikePrice: 0 },
+                        positions: marketDetails.positions || { long: BigInt(0), short: BigInt(0) },
+                        tradingPair,
+                        owner: marketDetails.owner || await this.getCurrentUserPrincipal(),
+                        currentPhase: marketDetails.currentPhase || { Trading: null },
+                        createTimestamp: marketDetails.createTimestamp || BigInt(Math.floor(Date.now() / 1000) - 86400),
+                        endTimestamp: marketDetails.endTimestamp || BigInt(Math.floor(Date.now() / 1000) + 86400)
+                    };
+                } catch (error) {
+                    console.error("Error fetching details from specific market:", error);
+                    throw error;
+                }
             }
 
             // Otherwise get details for current market
@@ -186,6 +216,16 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
             if (!marketDetails.owner) {
                 console.log("DEBUG: Owner field missing in market details, adding current user as owner");
                 marketDetails.owner = await this.getCurrentUserPrincipal();
+            }
+
+            // Try to get trading pair from canister
+            if (!marketDetails.tradingPair) {
+                try {
+                    marketDetails.tradingPair = await this.getTradingPair();
+                } catch (error) {
+                    console.error("Error getting trading pair:", error);
+                    marketDetails.tradingPair = "ICP/USD"; // Fallback
+                }
             }
 
             return marketDetails;
@@ -294,22 +334,75 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
         this.assertInitialized();
 
         try {
-            // Import factory service
-            const { FactoryService } = await import("./factory-service");
-            const factoryService = FactoryService.getInstance();
-            await factoryService.initialize();
+            // Import factory service using FactoryApiService instead of factory-service.ts
+            const { FactoryApiService } = await import("./FactoryService");
 
-            // Get markets from factory
-            const markets = await factoryService.getMarkets();
+            console.log("Creating new FactoryApiService instance");
+            const factoryService = new FactoryApiService();
 
-            // Return just the IDs
-            return markets.map(market => market.id);
+            // Follow the same approach as ListMarketsMui component:
+            // 1. Try getAllMarketDetails first
+            console.log("APPROACH 1: Trying factoryService.getAllMarketDetails()");
+            try {
+                const marketDetailsResult = await factoryService.getAllMarketDetails();
+                console.log("getAllMarketDetails result:", marketDetailsResult);
+
+                if (marketDetailsResult.ok && marketDetailsResult.ok.length > 0) {
+                    console.log(`Found ${marketDetailsResult.ok.length} markets via getAllMarketDetails`);
+                    const markets = marketDetailsResult.ok.map((market: any) => market.canisterId.toString());
+                    console.log("Market canister IDs:", markets);
+                    return markets;
+                }
+            } catch (detailsError) {
+                console.error("Error using getAllMarketDetails:", detailsError);
+            }
+
+            // 2. Try getAllMarkets if getAllMarketDetails fails
+            console.log("APPROACH 2: Trying factoryService.getAllMarkets()");
+            try {
+                const allMarketsResult = await factoryService.getAllMarkets();
+                console.log("getAllMarkets result:", allMarketsResult);
+
+                if (allMarketsResult.ok && allMarketsResult.ok.length > 0) {
+                    console.log(`Found ${allMarketsResult.ok.length} markets via getAllMarkets`);
+                    const markets = allMarketsResult.ok.map((market: any) => market.canisterId.toString());
+                    console.log("Market canister IDs:", markets);
+                    return markets;
+                }
+            } catch (marketsError) {
+                console.error("Error using getAllMarkets:", marketsError);
+            }
+
+            // 3. Fall back to getAllContracts as a last resort
+            console.log("APPROACH 3: Falling back to getAllContracts");
+            try {
+                const contractsResult = await factoryService.getAllContracts();
+                console.log("getAllContracts result:", contractsResult);
+
+                if (contractsResult.ok && contractsResult.ok.length > 0) {
+                    console.log(`Found ${contractsResult.ok.length} contracts via getAllContracts`);
+
+                    // Filter for BinaryOptionMarket contracts only
+                    const markets = contractsResult.ok
+                        .filter((contract: any) => {
+                            const isBinaryMarket = contract && contract.type && 'BinaryOptionMarket' in contract.type;
+                            return isBinaryMarket;
+                        })
+                        .map((contract: any) => contract.address.toString());
+
+                    console.log(`Found ${markets.length} binary option markets:`, markets);
+                    return markets;
+                }
+            } catch (contractsError) {
+                console.error("Error using getAllContracts:", contractsError);
+            }
+
+            // If all approaches fail, return empty array
+            console.warn("All approaches failed to fetch markets");
+            return [];
         } catch (error) {
             console.error("Error fetching markets from factory:", error);
-
-            // Return default canister ID as fallback if available
-            const defaultCanisterId = process.env.NEXT_PUBLIC_BINARY_OPTION_MARKET_CANISTER_ID;
-            return defaultCanisterId ? [defaultCanisterId] : [];
+            return [];
         }
     }
 
@@ -489,10 +582,23 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
             console.log("DEBUG: Getting trading pair from canister");
             const tradingPair = await this.actor.getTradingPair();
             console.log("DEBUG: Got trading pair from canister:", tradingPair);
+
+            // Ensure the trading pair is formatted correctly
+            if (typeof tradingPair === 'string') {
+                // If it's in format like "SOL-USD", return as is
+                if (tradingPair.includes('-')) {
+                    return tradingPair;
+                }
+                // If it just has a token name like "SOL", add USD
+                if (!tradingPair.includes('-') && !tradingPair.includes('/')) {
+                    return `${tradingPair}-USD`;
+                }
+            }
+
             return tradingPair;
         } catch (error) {
             console.error("Error fetching trading pair:", error);
-            return "ETH/USD"; // Default fallback
+            return "ETH-USD"; // Default fallback
         }
     }
 }

@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useCallback } from 'react'; // Thêm import useCallback
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Flex, Box, Text, Button, VStack, useToast, Input,
     Select, HStack, Icon, ScaleFade, Table, Thead, Tbody, Tr, Th, Td, TableContainer,
@@ -70,9 +69,9 @@ function Customer({ contractAddress }: CustomerProps) {
     const [currentPrice, setCurrentPrice] = useState<number>(0);
     const [longPercentage, setLongPercentage] = useState<number>(50);
     const [shortPercentage, setShortPercentage] = useState<number>(50);
-    const [priceTimeRange, setPriceTimeRange] = useState<string>('1w');
-    const [positionTimeRange, setPositionTimeRange] = useState<string>('all');
-    const [biddingStartTime, setBiddingStartTime] = useState<number>(Math.floor(Date.now() / 1000) - 3600);
+    const [priceTimeRange, setPriceTimeRange] = useState<string>('1d');
+    const [positionTimeRange, setPositionTimeRange] = useState<string>('1d');
+    const [biddingStartTime, setBiddingStartTime] = useState<number>(0);
     const [tradingPair, setTradingPair] = useState<string>('ETH/USD');
     const [showRules, setShowRules] = useState<boolean>(true);
     const [marketResult, setMarketResult] = useState<string>('Pending');
@@ -99,17 +98,19 @@ function Customer({ contractAddress }: CustomerProps) {
     const [factoryService, setFactoryService] = useState<FactoryService | null>(null);
     const [availableMarkets, setAvailableMarkets] = useState<MarketInfo[]>([]);
 
-    // Add better debug logging for market ID
+    // Modify to properly handle market ID from props
     useEffect(() => {
-        if (contractAddress) {
-            console.log("INITIALIZATION: Using contract address as market ID:", contractAddress);
+        if (contractAddress && !marketId) {
+            console.log("Setting market ID from contract address:", contractAddress);
             setMarketId(contractAddress);
-            setShowMarketSelection(false);
-        } else {
-            console.log("INITIALIZATION: No contract address provided, showing market selection");
-            setShowMarketSelection(true);
+
+            // Reset other state when market ID changes
+            setPositions({ long: 0, short: 0 });
+            setTotalMarketPositions({ long: 0, short: 0 });
+            setBiddingStartTime(0);
+            setEndTimestamp(null);
         }
-    }, [contractAddress]);
+    }, [contractAddress, marketId]);
 
     const formatTimeRemaining = (timestampSec: number): string => {
         const now = Math.floor(Date.now() / 1000); // Convert current time to seconds
@@ -221,6 +222,21 @@ function Customer({ contractAddress }: CustomerProps) {
 
                 setMarketService(service);
                 console.log("INIT SERVICES: Market service set, initialization complete");
+
+                // Try to get balance right after initializing ledger service
+                try {
+                    const userBalance = await icpLedgerService.getBalance({
+                        owner: identity.getPrincipal(),
+                        subaccount: []
+                    });
+
+                    // Convert to human-readable format
+                    const balanceNumber = Number(userBalance) / 10e7;
+                    console.log("IDENTITY: Initial balance:", balanceNumber.toFixed(4));
+                    setBalance(balanceNumber.toFixed(4));
+                } catch (balanceError) {
+                    console.error("IDENTITY: Error fetching initial balance:", balanceError);
+                }
             } catch (error) {
                 console.error("INIT SERVICES: Error during initialization:", error);
             }
@@ -239,95 +255,89 @@ function Customer({ contractAddress }: CustomerProps) {
         }
     }, [showMarketSelection, factoryService, fetchAvailableMarkets]);
 
+    // More detailed fetch market details with better logging
     const fetchMarketDetails = useCallback(async () => {
+        if (!marketService || !marketId) {
+            console.log("Cannot fetch market details - missing service or marketId");
+            return;
+        }
+
         try {
-            console.log("FETCH DETAILS: Starting market details fetch");
+            console.log(`Fetching market details for ${marketId}`);
+            const details = await marketService.getMarketDetails(marketId);
+            console.log("Market details retrieved:", details);
 
-            if (!marketService) {
-                console.error("FETCH DETAILS: Market service not available");
-                return;
-            }
+            if (details) {
+                // Extract market details
+                const strikeValue = details.oracleDetails.strikePrice;
+                const finalValue = details.oracleDetails.finalPrice;
+                console.log(`Strike price: ${strikeValue}, Final price: ${finalValue}`);
+                setStrikePrice(strikeValue);
+                setFinalPrice(finalValue);
 
-            // First get the market phase
-            const phase = await marketService.getPhase();
-            console.log("FETCH DETAILS: Current phase:", phase);
-            setCurrentPhase(phase);
-
-            // Check if user is admin or owner
-            await checkIsAdmin();
-
-            console.log("FETCH DETAILS: Getting market details");
-            const marketDetails = await marketService.getMarketDetails();
-            console.log("FETCH DETAILS: Market details:", marketDetails);
-
-            const strikePrice = marketDetails.oracleDetails.strikePrice;
-            const finalPrice = marketDetails.oracleDetails.finalPrice;
-
-            console.log("FETCH DETAILS: Strike price:", strikePrice);
-            console.log("FETCH DETAILS: Final price:", finalPrice);
-
-            setStrikePrice(strikePrice); // Giả định 8 số thập phân
-            setFinalPrice(finalPrice);   // Giả định 8 số thập phân
-
-            // Get user position
-            console.log("FETCH DETAILS: Getting user position for principal:", identityPrincipal);
-            if (!identityPrincipal) {
-                console.log("FETCH DETAILS: No identity principal available");
-            } else {
-                const userPosition = await marketService.getUserPosition(Principal.fromText(identityPrincipal));
-                console.log("FETCH DETAILS: User position:", userPosition);
-
-                if (userPosition) {
-                    setPositions({
-                        long: Number(userPosition.long) / 10e7,
-                        short: Number(userPosition.short) / 10e7
+                if (details.positions) {
+                    const longPos = Number(details.positions.long) / 1e8;
+                    const shortPos = Number(details.positions.short) / 1e8;
+                    console.log(`Market positions - Long: ${longPos}, Short: ${shortPos}`);
+                    setTotalMarketPositions({
+                        long: longPos,
+                        short: shortPos
                     });
-                } else {
-                    console.log("FETCH DETAILS: User position is null. Setting default positions.");
-                    setPositions({ long: 0, short: 0 });
                 }
 
-                // Get total market positions
-                console.log("FETCH DETAILS: Setting total market positions");
-                setTotalMarketPositions({
-                    long: Number(marketDetails.positions.long) / 10e7,
-                    short: Number(marketDetails.positions.short) / 10e7
-                });
+                // Get phase directly using getCurrentPhase instead of from market details
+                try {
+                    console.log("Getting current phase directly via getCurrentPhase()");
+                    const phaseResult = await marketService.getCurrentPhase();
+                    console.log("Phase result:", phaseResult);
 
-                console.log("FETCH DETAILS: Getting total deposit");
-                const totalDeposit = await marketService.getTotalDeposit();
-                setTotalDeposited(Number(totalDeposit) / 10e7);
+                    // Convert the variant object to Phase enum
+                    let phase = Phase.Trading;
+                    if ('Bidding' in phaseResult) {
+                        phase = Phase.Bidding;
+                        console.log("Setting phase to BIDDING");
+                    } else if ('Trading' in phaseResult) {
+                        phase = Phase.Trading;
+                        console.log("Setting phase to TRADING");
+                    } else if ('Maturity' in phaseResult) {
+                        phase = Phase.Maturity;
+                        console.log("Setting phase to MATURITY");
+                    } else if ('Expiry' in phaseResult) {
+                        phase = Phase.Expiry;
+                        console.log("Setting phase to EXPIRY");
+                    }
 
-                if (currentPhase === Phase.Expiry) {
-                    console.log("FETCH DETAILS: Market is in Expiry phase, checking reward claimability");
-                    setShouldCheckRewardClaimability(true);
+                    console.log(`Current phase: ${Phase[phase]}`);
+                    setCurrentPhase(phase);
+                } catch (phaseError) {
+                    console.error("Error getting current phase:", phaseError);
                 }
 
-                console.log("FETCH DETAILS: Getting end timestamp");
-                const timestamp = await marketService.getEndTimestamp();
-                if (timestamp) {
-                    console.log("FETCH DETAILS: End timestamp (seconds):", timestamp);
-                    setEndTimestamp(Number(timestamp));  // No need for conversion since it's already in seconds
+                if (details.tradingPair) {
+                    console.log(`Trading pair: ${details.tradingPair}`);
+                    setTradingPair(details.tradingPair);
+                    // Format trading pair for chart use
+                    const formattedPair = details.tradingPair.replace('/', '-');
+                    setChartSymbol(formattedPair);
+                }
+
+                if (details.endTimestamp) {
+                    const timestamp = Number(details.endTimestamp);
+                    console.log(`End timestamp: ${timestamp} (${new Date(timestamp * 1000).toString()})`);
+                    setEndTimestamp(timestamp);
+                }
+
+                // Set bidding start time from createTimestamp
+                if (details.createTimestamp) {
+                    const timestamp = Number(details.createTimestamp);
+                    console.log(`Bidding start time: ${timestamp} (${new Date(timestamp * 1000).toString()})`);
+                    setBiddingStartTime(timestamp);
                 }
             }
         } catch (error) {
-            console.error("FETCH DETAILS: Error fetching market details:", error);
+            console.error("Error fetching market details:", error);
         }
-
-        try {
-            if (ledgerService && identityPrincipal) {
-                console.log("FETCH DETAILS: Getting user balance");
-                const userBalance = await ledgerService.getBalance({
-                    owner: Principal.fromText(identityPrincipal),
-                    subaccount: []
-                });
-                console.log("FETCH DETAILS: User balance:", userBalance);
-                setBalance((Number(userBalance) / 10e7).toFixed(4).toString());
-            }
-        } catch (error) {
-            console.error("FETCH DETAILS: Error fetching user balance:", error);
-        }
-    }, [marketService, ledgerService, identityPrincipal, currentPhase]);
+    }, [marketId, marketService]);
 
     const setInitialIdentity = async () => {
         try {
@@ -734,37 +744,26 @@ function Customer({ contractAddress }: CustomerProps) {
                     let tradingPair = await marketService.getTradingPair();
                     console.log("DEBUG: Raw trading pair from canister:", tradingPair);
 
-                    // If trading pair doesn't include USD, add it
-                    if (!tradingPair.includes("/")) {
-                        tradingPair = `${tradingPair}/USD`;
+                    // Handle the formatting between SOL-USD and SOL/USD
+                    if (typeof tradingPair === 'string') {
+                        // Format for display (SOL-USD -> SOL/USD)
+                        if (tradingPair.includes('-')) {
+                            tradingPair = tradingPair.replace('-', '/');
+                        } else if (!tradingPair.includes('/') && !tradingPair.includes('-')) {
+                            tradingPair = `${tradingPair}/USD`;
+                        }
+                    } else {
+                        tradingPair = "ICP/USD"; // Fallback
                     }
 
-                    console.log("DEBUG: Formatted trading pair:", tradingPair);
+                    console.log("DEBUG: Formatted trading pair for display:", tradingPair);
                     setTradingPair(tradingPair);
 
-                    // Format for chart
+                    // Format for chart (convert back to hyphen format for API compatibility)
                     const formattedPair = tradingPair.replace('/', '-');
+                    console.log("DEBUG: Formatted trading pair for charts:", formattedPair);
                     setChartSymbol(formattedPair);
-
-                    // Get market details to get the strike price
-                    const marketDetails = await marketService.getMarketDetails();
-                    console.log("DEBUG: Raw market details:", marketDetails);
-
-                    // Make sure to properly set the strike price from the canister
-                    if (marketDetails && marketDetails.oracleDetails) {
-                        const strikeValue = marketDetails.oracleDetails.strikePrice;
-                        console.log("DEBUG: Raw strike price value:", strikeValue);
-                        console.log("DEBUG: Strike price type:", typeof strikeValue);
-
-                        // Ensure we have a valid number
-                        if (typeof strikeValue === 'number' && !isNaN(strikeValue)) {
-                            console.log("DEBUG: Setting strike price to:", strikeValue);
-                            setStrikePrice(strikeValue);
-                        } else {
-                            console.error("Strike price is not a valid number:", strikeValue);
-                            setStrikePrice(0); // Default fallback
-                        }
-                    }
+                    tradingPairForChart = formattedPair; // Update the variable used for chart data
                 }
             } catch (error) {
                 console.error("Error loading trading pair and strike price:", error);
@@ -863,6 +862,126 @@ function Customer({ contractAddress }: CustomerProps) {
             fetchMarketDetails();
         }
     }, [authenticated, marketService, identityPrincipal, fetchMarketDetails]);
+
+    // Add new function to create position history points
+    const createPositionHistoryPoints = useCallback(() => {
+        if (!biddingStartTime || !endTimestamp) return [];
+
+        const now = Math.floor(Date.now() / 1000);
+        const result = [];
+
+        // Start with 50/50 at beginning
+        result.push({
+            timestamp: biddingStartTime,
+            longPercentage: 50,
+            shortPercentage: 50
+        });
+
+        // If we have position data
+        if (totalMarketPositions.long > 0 || totalMarketPositions.short > 0) {
+            const total = totalMarketPositions.long + totalMarketPositions.short;
+            const longPercentage = total > 0 ? Math.round((totalMarketPositions.long / total) * 100) : 50;
+            const shortPercentage = total > 0 ? Math.round((totalMarketPositions.short / total) * 100) : 50;
+
+            // Add current position point
+            result.push({
+                timestamp: now,
+                longPercentage: longPercentage,
+                shortPercentage: shortPercentage
+            });
+
+            // Add end position point (for projection)
+            if (now < endTimestamp) {
+                result.push({
+                    timestamp: endTimestamp,
+                    longPercentage: longPercentage,
+                    shortPercentage: shortPercentage
+                });
+            }
+        }
+
+        return result;
+    }, [biddingStartTime, endTimestamp, totalMarketPositions]);
+
+    // Create position history points when relevant data changes
+    useEffect(() => {
+        // Only create position points when we have both timestamps and position data
+        if (biddingStartTime > 0 && endTimestamp && (totalMarketPositions.long > 0 || totalMarketPositions.short > 0)) {
+            const historyPoints = createPositionHistoryPoints();
+            console.log("Created position history points:", historyPoints);
+            setPositionHistory(historyPoints);
+        }
+    }, [biddingStartTime, endTimestamp, totalMarketPositions, createPositionHistoryPoints]);
+
+    // Add additional effect to update market positions
+    useEffect(() => {
+        if (!marketService || !marketId) return;
+
+        const updateMarketPositions = async () => {
+            try {
+                const marketDetails = await marketService.getMarketDetails(marketId);
+                if (marketDetails && marketDetails.positions) {
+                    // Convert bigint positions to numbers
+                    const longPosition = typeof marketDetails.positions.long === 'bigint'
+                        ? Number(marketDetails.positions.long) / 1e8
+                        : 0;
+                    const shortPosition = typeof marketDetails.positions.short === 'bigint'
+                        ? Number(marketDetails.positions.short) / 1e8
+                        : 0;
+
+                    setTotalMarketPositions({
+                        long: longPosition,
+                        short: shortPosition
+                    });
+
+                    console.log("Market positions updated:", { long: longPosition, short: shortPosition });
+                }
+            } catch (error) {
+                console.error("Error updating market positions:", error);
+            }
+        };
+
+        updateMarketPositions();
+        const interval = setInterval(updateMarketPositions, 10000);
+        return () => clearInterval(interval);
+    }, [marketService, marketId]);
+
+    // Add a function to fetch user balance
+    const fetchUserBalance = async () => {
+        if (!ledgerService || !authenticated) {
+            console.log("Cannot fetch balance - missing ledger service or not authenticated");
+            return;
+        }
+
+        try {
+            console.log("Fetching user balance...");
+            const identity = await AuthClient.create().then(client => client.getIdentity());
+            const principal = identity.getPrincipal();
+
+            // Get balance from ledger
+            const userBalance = await ledgerService.getBalance({
+                owner: principal,
+                subaccount: [] // Main account
+            });
+
+            console.log("Raw balance from ledger:", userBalance.toString());
+
+            // Convert to human-readable format (divide by 10^8)
+            const balanceNumber = Number(userBalance) / 10e7;
+            console.log("Formatted balance:", balanceNumber.toFixed(4));
+
+            setBalance(balanceNumber.toFixed(4));
+        } catch (error) {
+            console.error("Error fetching user balance:", error);
+        }
+    };
+
+    // Call the balance fetch function after authentication and ledger service initialization
+    useEffect(() => {
+        if (authenticated && ledgerService) {
+            fetchUserBalance();
+        }
+    }, [authenticated, ledgerService]);
 
     return (
         <Flex direction="column" alignItems="center" justifyContent="flex-start" p={6} bg="black" minH="100vh" position="relative">
@@ -1349,6 +1468,10 @@ function Customer({ contractAddress }: CustomerProps) {
                                                                     });
                                                                     // Refresh data after state change
                                                                     fetchMarketDetails();
+
+                                                                    // Update UI immediately to show phase transition
+                                                                    setCurrentPhase(Phase.Bidding);
+                                                                    console.log("Phase changed to Bidding");
                                                                 })
                                                                 .catch(error => {
                                                                     toast({

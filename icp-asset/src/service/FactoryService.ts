@@ -1042,31 +1042,49 @@ export class FactoryApiService {
     async getAllMarketDetails(): Promise<ApiResult<any[]>> {
         try {
             console.log("Fetching all market details...");
+            // Call the canister directly bypassing any caching
             const result = await this.factoryActor.getAllMarketDetails();
             console.log("Raw market details result:", result);
 
+            if (!result || !Array.isArray(result) || result.length === 0) {
+                console.warn("No markets returned from backend or invalid format");
+                return { ok: [], err: null };
+            }
+
             // Process the returned data to ensure proper formatting
             const processedResult = result.map((market: any) => {
-                // Ensure proper handling of optional values
-                const strikePrice = market.strikePrice && market.strikePrice.length > 0
-                    ? market.strikePrice[0]
-                    : null;
+                console.log("Processing raw market:", JSON.stringify(market, null, 2));
 
-                const tradingPair = market.tradingPair && market.tradingPair.length > 0
-                    ? market.tradingPair[0]
-                    : null;
+                // Handle optional values in Candid format
+                // In Candid, optionals are represented as arrays: empty array for null, array with one element for value
+                const getOptionalValue = (opt: any) => {
+                    if (!opt || !Array.isArray(opt) || opt.length === 0) {
+                        return null;
+                    }
+                    return opt[0];
+                };
 
-                // Log the values for debugging
-                console.log(`Market ${market.canisterId.toString()}: Strike price = ${strikePrice}, Trading pair = ${tradingPair}`);
+                // Extract and process values
+                const strikePrice = getOptionalValue(market.strikePrice);
+                const tradingPair = getOptionalValue(market.tradingPair);
+                const expiry = getOptionalValue(market.expiry);
 
+                // Log the extracted values
+                console.log(`Market ${market.canisterId.toString()}: Strike price = ${strikePrice}, Trading pair = ${tradingPair}, Expiry = ${expiry}`);
+
+                // Return processed market record
                 return {
-                    ...market,
+                    canisterId: market.canisterId,
+                    name: market.name,
                     strikePrice: strikePrice,
-                    tradingPair: tradingPair
+                    tradingPair: tradingPair,
+                    expiry: expiry
                 };
             });
 
             console.log("Processed market details:", processedResult);
+
+            // Return the processed results
             return { ok: processedResult, err: null };
         } catch (error) {
             console.error("Error fetching market details:", error);
@@ -1087,17 +1105,29 @@ export class FactoryApiService {
             const result = await this.factoryActor.getMarketStrikePrices();
             console.log("Raw market strike prices result:", JSON.stringify(result, null, 2));
 
+            if (!result || !Array.isArray(result)) {
+                console.warn("Invalid or empty result from getMarketStrikePrices");
+                return { ok: new Map(), err: null };
+            }
+
             // Convert the array of pairs to a Map
             const strikePricesMap = new Map<string, number>();
 
             result.forEach((pair: any) => {
-                const [canisterId, strikePrice] = pair;
+                if (!pair || typeof pair !== 'object') {
+                    console.warn("Invalid pair in result:", pair);
+                    return;
+                }
+
+                // Extract canisterId and optional strikePrice
+                const canisterId = pair[0];
+                const strikePrice = pair[1];
 
                 // Debug the values
                 console.log(`Processing pair: canisterId = ${canisterId.toString()}, strikePrice =`, strikePrice);
 
-                if (strikePrice && strikePrice.length > 0) {
-                    // Handle optional values correctly
+                // Handle optional values in Candid format
+                if (strikePrice && Array.isArray(strikePrice) && strikePrice.length > 0) {
                     const price = strikePrice[0];
                     console.log(`Found price ${price} for canister ${canisterId.toString()}`);
                     if (typeof price === 'number' && !isNaN(price)) {
@@ -1239,6 +1269,24 @@ export class FactoryApiService {
             return {
                 ok: false,
                 err: `Failed to start trading: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
+    }
+
+    /**
+     * Get all markets registered in the factory
+     */
+    async getAllMarkets(): Promise<ApiResult<any[]>> {
+        try {
+            console.log("Fetching all markets...");
+            const result = await this.factoryActor.getAllMarkets();
+            console.log("Raw getAllMarkets result:", result);
+            return { ok: result, err: null };
+        } catch (error) {
+            console.error("Error fetching all markets:", error);
+            return {
+                ok: null,
+                err: error instanceof Error ? error.message : "Unknown error fetching markets"
             };
         }
     }

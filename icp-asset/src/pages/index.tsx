@@ -14,7 +14,7 @@ const Home: NextPage = () => {
     if (marketId) {
       router.replace(`/customer/${marketId}`);
     } else {
-      // Otherwise, go to the markets listing page
+      // Redirect to the listaddress page instead of markets
       router.replace('/listaddress/1');
     }
   }, [router, marketId]);

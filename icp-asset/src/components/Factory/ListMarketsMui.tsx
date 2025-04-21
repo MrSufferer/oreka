@@ -148,6 +148,11 @@ const ListMarketsMui: React.FC<ListMarketsProps> = ({ userPrincipal, page = 1 })
         console.log("Starting to fetch contracts...");
         setIsLoading(true);
         setError(null);
+
+        // Add more detailed debugging
+        console.log("------------------- MARKET LIST REFRESH -------------------");
+        console.log(`Refresh started at ${new Date().toISOString()}`);
+
         try {
             // Force a fresh identity to avoid caching issues
             const authClient = await AuthClient.create();
@@ -155,79 +160,126 @@ const ListMarketsMui: React.FC<ListMarketsProps> = ({ userPrincipal, page = 1 })
             try {
                 if (await authClient.isAuthenticated()) {
                     identity = authClient.getIdentity();
-                    console.log("Using authenticated identity for market fetch");
+                    const principal = identity.getPrincipal().toString();
+                    console.log(`Using authenticated identity: ${principal}`);
 
                     // Update the factory service with the identity
                     factoryService.updateIdentity(identity);
                 } else {
-                    console.log("No authenticated identity found, using anonymous");
+                    console.warn("No authenticated identity found, using anonymous");
                 }
             } catch (e) {
                 console.warn("Error getting identity:", e);
             }
 
-            // First, try to get all market details which includes trading pairs and strike prices
-            console.log("Calling factoryService.getAllMarketDetails()");
-            const marketDetailsResult = await factoryService.getAllMarketDetails();
-            console.log("Market details API response:", marketDetailsResult);
+            // First approach: Try getAllMarketDetails
+            console.log("APPROACH 1: Calling factoryService.getAllMarketDetails()");
+            try {
+                const marketDetailsResult = await factoryService.getAllMarketDetails();
+                console.log("Market details API response:", marketDetailsResult);
 
-            if (marketDetailsResult.ok && marketDetailsResult.ok.length > 0) {
-                console.log("Successfully fetched market details:", marketDetailsResult.ok);
-                console.log("First market sample:", marketDetailsResult.ok[0]);
+                if (marketDetailsResult.ok && marketDetailsResult.ok.length > 0) {
+                    console.log(`Found ${marketDetailsResult.ok.length} markets via getAllMarketDetails`);
+                    console.log("Market list:", marketDetailsResult.ok);
 
-                // Transform the market details for display
-                const allMarketDetails = marketDetailsResult.ok.map((market: any) => {
-                    console.log("Processing market:", market);
-                    console.log("Strike price:", market.strikePrice, "Trading pair:", market.tradingPair);
+                    // Transform the market details for display
+                    const allMarketDetails = marketDetailsResult.ok.map((market: any) => {
+                        console.log(`Processing market: ${market.name} (${market.canisterId.toString()})`);
+                        console.log(`Market data: Strike price=${market.strikePrice}, Trading pair=${market.tradingPair}`);
 
-                    let formattedStrikePrice = 'N/A';
-                    if (market.strikePrice !== null && market.strikePrice !== undefined) {
-                        const priceValue = typeof market.strikePrice === 'object' && 'valueOf' in market.strikePrice
-                            ? market.strikePrice.valueOf()
-                            : market.strikePrice;
-
-                        if (typeof priceValue === 'number') {
-                            formattedStrikePrice = `$${priceValue.toFixed(2)}`;
-                        } else {
-                            formattedStrikePrice = `$${String(priceValue)}`;
+                        let formattedStrikePrice = 'N/A';
+                        if (market.strikePrice !== null && market.strikePrice !== undefined) {
+                            if (typeof market.strikePrice === 'number') {
+                                formattedStrikePrice = `$${market.strikePrice.toFixed(2)}`;
+                            } else {
+                                formattedStrikePrice = `$${String(market.strikePrice)}`;
+                            }
                         }
-                        console.log("Formatted strike price:", formattedStrikePrice);
-                    }
 
-                    // Base contract info
-                    const displayContract: DisplayContract = {
-                        name: market.name || 'Unnamed Market',
-                        contract_type: 'BinaryOptionMarket',
-                        canister_id: market.canisterId.toString(),
-                        status: 'active', // Default to active status
-                        // Market-specific fields from the new API
-                        strikePrice: formattedStrikePrice,
-                        tradingPair: market.tradingPair ? market.tradingPair : 'BTC-USD',
-                    };
+                        // Base contract info
+                        const displayContract: DisplayContract = {
+                            name: market.name || 'Unnamed Market',
+                            contract_type: 'BinaryOptionMarket',
+                            canister_id: market.canisterId.toString(),
+                            status: 'active', // Default to active status
+                            strikePrice: formattedStrikePrice,
+                            tradingPair: market.tradingPair || 'Unknown'
+                        };
 
-                    return displayContract;
-                });
+                        return displayContract;
+                    });
 
-                console.log("Processed market details:", allMarketDetails);
-                setContracts(allMarketDetails);
-                setMarkets(allMarketDetails);
-                setIsLoading(false);
-                return;
-            } else {
-                console.log("No market details found or API returned error");
+                    console.log("Processed market details:", allMarketDetails);
+                    setContracts(allMarketDetails);
+                    setMarkets(allMarketDetails);
+                    setIsLoading(false);
+                    console.log("Successfully updated market list with getAllMarketDetails data");
+                    return;
+                } else {
+                    console.warn("No market details found or API returned error");
+                }
+            } catch (detailsError) {
+                console.error("Error using getAllMarketDetails:", detailsError);
             }
 
-            // Fallback to old method if the new API call fails
-            console.log("Market details API failed, falling back to getAllContracts");
-            const result = await factoryService.getAllContracts();
-            console.log("Contracts API response:", result);
-            setRawData(JSON.stringify(result, null, 2));
+            // Second approach: Try getAllMarkets for basic info
+            console.log("APPROACH 2: Trying factoryService.getAllMarkets()");
+            try {
+                const allMarketsResult = await factoryService.getAllMarkets();
+                console.log("getAllMarkets response:", allMarketsResult);
 
-            if (result.ok) {
-                console.log("Successfully fetched contracts:", result.ok);
-                if (result.ok.length === 0) {
-                    console.log("No contracts found in the response");
+                if (allMarketsResult.ok && allMarketsResult.ok.length > 0) {
+                    console.log(`Found ${allMarketsResult.ok.length} markets via getAllMarkets`);
+
+                    // Transform markets for display
+                    const allMarketDetails = allMarketsResult.ok.map((market: any) => {
+                        console.log(`Processing market from getAllMarkets: ${market.name || 'Unknown'}`);
+
+                        let strikePrice = 'N/A';
+                        let tradingPair = 'Unknown';
+
+                        // Handle optional values in Candid format
+                        if (market.strikePrice && Array.isArray(market.strikePrice) && market.strikePrice.length > 0) {
+                            const price = market.strikePrice[0];
+                            if (typeof price === 'number') {
+                                strikePrice = `$${price.toFixed(2)}`;
+                            }
+                        }
+
+                        if (market.tradingPair && Array.isArray(market.tradingPair) && market.tradingPair.length > 0) {
+                            tradingPair = market.tradingPair[0];
+                        }
+
+                        return {
+                            name: market.name || 'Unnamed Market',
+                            contract_type: 'BinaryOptionMarket',
+                            canister_id: market.canisterId.toString(),
+                            status: 'active',
+                            strikePrice: strikePrice,
+                            tradingPair: tradingPair
+                        };
+                    });
+
+                    console.log("Processed getAllMarkets data:", allMarketDetails);
+                    setContracts(allMarketDetails);
+                    setMarkets(allMarketDetails);
+                    setIsLoading(false);
+                    console.log("Successfully updated market list with getAllMarkets data");
+                    return;
+                } else {
+                    console.warn("No markets found with getAllMarkets or API returned error");
                 }
+            } catch (marketsError) {
+                console.error("Error using getAllMarkets:", marketsError);
+            }
+
+            // Third approach (fallback): Use the original getAllContracts method
+            console.log("APPROACH 3: Falling back to getAllContracts");
+            const result = await factoryService.getAllContracts();
+            console.log("getAllContracts API response:", result);
+
+            if (result.ok && result.ok.length > 0) {
+                console.log(`Found ${result.ok.length} contracts via getAllContracts`);
 
                 // Get strike prices to enrich the data
                 let strikePricesMap = new Map<string, number>();
@@ -235,7 +287,7 @@ const ListMarketsMui: React.FC<ListMarketsProps> = ({ userPrincipal, page = 1 })
                     const strikePricesResult = await factoryService.getMarketStrikePrices();
                     if (strikePricesResult.ok) {
                         strikePricesMap = strikePricesResult.ok;
-                        console.log("Strike prices map:", strikePricesMap);
+                        console.log("Strike prices map:", Object.fromEntries(strikePricesMap));
                     }
                 } catch (error) {
                     console.error("Error fetching strike prices:", error);
@@ -264,7 +316,7 @@ const ListMarketsMui: React.FC<ListMarketsProps> = ({ userPrincipal, page = 1 })
                         canister_id: contract.address.toString(),
                         created: new Date(Number(contract.created) / 1000000).toLocaleString(),
                         owner: contract.owner.toString(),
-                        status: 'active' // Default to active status
+                        status: 'active'
                     };
 
                     // Add strike price from the strike prices map
@@ -288,18 +340,25 @@ const ListMarketsMui: React.FC<ListMarketsProps> = ({ userPrincipal, page = 1 })
                 const marketContracts = allContracts.filter(c => c.contract_type === 'BinaryOptionMarket');
                 const tokenContracts = allContracts.filter(c => c.contract_type === 'ICRC1Token');
 
+                console.log(`Found ${marketContracts.length} markets after filtering`);
+
                 setContracts(allContracts);
                 setMarkets(marketContracts);
                 setTokens(tokenContracts);
                 setIsLoading(false);
-            } else if (result.err) {
-                setError(`Error fetching contracts: ${result.err}`);
+                console.log("Successfully updated market list with getAllContracts data");
+            } else {
+                console.error("No contracts found in any approach");
+                setError(`No markets found. Please try again later.`);
                 setIsLoading(false);
             }
         } catch (error) {
-            console.error("Error in fetchContracts:", error);
+            console.error("Fatal error in fetchContracts:", error);
             setError(`Failed to fetch contracts: ${error instanceof Error ? error.message : String(error)}`);
             setIsLoading(false);
+        } finally {
+            console.log(`Refresh completed at ${new Date().toISOString()}`);
+            console.log("------------------- END MARKET LIST REFRESH -------------------");
         }
     };
 
