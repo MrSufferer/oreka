@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Flex, Box, Text, Button, VStack, useToast, Input,
     Select, HStack, Icon, ScaleFade, Table, Thead, Tbody, Tr, Th, Td, TableContainer,
-    Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Divider, Circle, Spacer, FormControl, FormLabel
+    Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Divider, Circle, Spacer, FormControl, FormLabel, UnorderedList, ListItem
 } from '@chakra-ui/react';
-import { FaEthereum, FaWallet, FaTrophy, FaRegClock, FaArrowUp, FaArrowDown, FaCoins, FaChartLine } from 'react-icons/fa';
+import { ChevronUpIcon, ChevronDownIcon } from '@chakra-ui/icons';
+import { FaEthereum, FaWallet, FaTrophy, FaRegClock, FaArrowUp, FaArrowLeft, FaArrowDown, FaCoins, FaChartLine } from 'react-icons/fa';
 import { GoInfinity } from "react-icons/go";
 import { PiChartLineUpLight } from "react-icons/pi";
 import { SiBitcoinsv } from "react-icons/si";
@@ -1001,43 +1002,94 @@ function Customer({ contractAddress }: CustomerProps) {
                         mb={4}
                     >
                         <Button
-                            leftIcon={<FaArrowUp color="#FEDF56" />}
+                            leftIcon={<FaArrowLeft color="white" />}
                             borderColor="#FEDF56"
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
                             onClick={() => router.push('/listaddress/1')}
-                            color="#FEDF56"
+                            color="gray.400"
+                            _hover={{
+                                color: "white",
+                            }}
                         >
                             Markets
                         </Button>
 
-                        <HStack spacing={6} ml="auto" color="#e2e8f0">
-                            <Icon as={FaWallet} />
-                            <Text>{abbreviateAddress(identityPrincipal || '')}</Text>
-                            <Icon as={GoInfinity} />
-                            <Text>Balance: {balance} ICP</Text>
+                        <HStack spacing={4} ml="auto">
+                            {/* Balance Box */}
+                            <Box
+                                p="2px"
+                                borderRadius="md"
+                                bg="transparent"
+                                sx={{
+                                    backgroundImage: "linear-gradient(270deg, #ff0059, #5a73d8, #5858b5 , #77efef, #4a63c8)",
+                                    backgroundSize: "400% 400%",
+                                    animation: "gradient-border 8s ease infinite",
+                                    borderRadius: "8px"
+                                }}
+                            >
+                                <HStack
+                                    p={2}
+                                    bg="#1A1C21"
+                                    borderRadius="md"
+                                    w="full"
+                                >
+                                    <Text color="white" fontWeight="medium">
+                                        {balance} ICP
+                                    </Text>
+                                </HStack>
+
+                                <style jsx>{`
+                                    @keyframes gradient-border {
+                                        0% { background-position: 0% 50%; }
+                                        50% { background-position: 100% 50%; }
+                                        100% { background-position: 0% 50%; }
+                                    }
+                                `}</style>
+                            </Box>
+
+                            {/* Wallet Address Box */}
+                            <Box
+                                p="2px"
+                                borderRadius="lg"
+                                sx={{
+                                    backgroundImage: "linear-gradient(270deg, #eaea72, #f49a24, #e25375, #f2f2bf, #f2f2cd)",
+                                    backgroundSize: "400% 400%",
+                                    animation: "gradient-border 6s ease infinite",
+                                    display: "inline-block",
+                                    backgroundColor: "transparent"
+                                }}
+                            >
+                                <Box
+                                    display="flex"
+                                    alignItems="center"
+                                    bg="gray.800"
+                                    borderRadius="lg"
+                                    px={4}
+                                    py={2}
+                                    boxShadow="md"
+                                    transition="all 0.2s"
+                                    _hover={{ bg: "gray.700" }}
+                                >
+                                    <Text color="white" fontWeight="semibold" fontSize="md">
+                                        {abbreviateAddress(identityPrincipal || '')}
+                                    </Text>
+                                </Box>
+
+                                <style jsx>{`
+                                    @keyframes gradient-border {
+                                        0% { background-position: 0% 50%; }
+                                        50% { background-position: 100% 50%; }
+                                        100% { background-position: 0% 50%; }
+                                    }
+                                `}</style>
+                            </Box>
                         </HStack>
                     </Flex>
 
                     {/* Market Title and Info */}
-                    <Box display="flex" alignItems="center" mb={6} ml={6} width="100%">
-                        <HStack>
-                            {/* Coin Image */}
-                            <Box
-                                borderRadius="full"
-                                bg="gray.800"
-                                p={2}
-                                mr={4}
-                            >
-                                <Icon
-                                    as={tradingPair.includes("BTC") ? SiBitcoinsv :
-                                        tradingPair.includes("ETH") ? FaEthereum :
-                                            GoInfinity}
-                                    boxSize="30px"
-                                    color="#FEDF56"
-                                />
-                            </Box>
-
+                    <Flex width="100%" justifyContent="center" mb={6}>
+                        <Box width="100%" maxW="1200px">
                             <Box>
                                 <Heading size="md" fontSize="30px">
                                     <HStack>
@@ -1045,26 +1097,26 @@ function Customer({ contractAddress }: CustomerProps) {
                                             {tradingPair}
                                         </Text>
                                         <Text color="white" fontSize="25px">
-                                            will reach ${strikePrice} by {formatMaturityTime(endTimestamp || 0)}
+                                            will reach <Text as="span" color={finalPrice >= strikePrice ? "green.400" : "red.400"}>${strikePrice}</Text> by {formatMaturityTime(endTimestamp || 0)}
                                         </Text>
                                     </HStack>
                                 </Heading>
-                                <HStack spacing={2}>
-                                    <HStack color="gray.400">
+                                <HStack spacing={2} mt={1}>
+                                    <HStack color="rgba(255, 255, 255, 0.7)">
                                         <PiChartLineUpLight />
-                                        <Text color="gray.400" fontSize="sm">
+                                        <Text color="rgba(255, 255, 255, 0.7)" fontSize="sm">
                                             {totalDeposited.toFixed(2)} ICP |
                                         </Text>
                                     </HStack>
-                                    <HStack color="gray.400">
+                                    <HStack color="rgba(255, 255, 255, 0.7)">
                                         <FaRegClock />
-                                        <Text color="gray.400" fontSize="sm">
+                                        <Text color="rgba(255, 255, 255, 0.7)" fontSize="sm">
                                             {endTimestamp ? formatMaturityTime(endTimestamp) : "Unknown"} |
                                         </Text>
                                     </HStack>
-                                    <HStack color="gray.400">
+                                    <HStack color="rgba(255, 255, 255, 0.7)">
                                         <Icon as={FaRegClock} />
-                                        <Text color="gray.400" fontSize="sm">
+                                        <Text color="rgba(255, 255, 255, 0.7)" fontSize="sm">
                                             Phase: {Phase[currentPhase]}
                                         </Text>
                                     </HStack>
@@ -1083,22 +1135,73 @@ function Customer({ contractAddress }: CustomerProps) {
                                     <Text fontWeight="bold">Result: {finalPrice >= strikePrice ? "LONG WINS" : "SHORT WINS"}</Text>
                                 </Box>
                             )}
-                        </HStack>
-                    </Box>
+                        </Box>
+                    </Flex>
 
                     {/* Main Content */}
-                    <Flex direction={{ base: "column", md: "row" }} width="100%">
+                    <Flex direction={{ base: 'column', md: 'row' }} gap={8} align="flex-start" px={2}>
                         {/* Left Side - Charts and Rules */}
-                        <Box width={{ base: "100%", md: "75%" }} pr={{ base: 0, md: 4 }}>
-                            <Tabs variant="line" colorScheme="yellow">
-                                <TabList>
-                                    <Tab>Price Chart</Tab>
-                                    <Tab>Position Chart</Tab>
-                                </TabList>
+                        <Box width={{ base: '100%', md: '75%' }} pr={{ base: 0, md: 6 }} ml={0}>
+                            <Tabs variant="line" colorScheme="yellow" border="1px solid" borderColor="gray.700" borderRadius="xl" pb={2} mb={6} height="460px">
+                                <Box pb={1}>
+                                    <TabList
+                                        borderBottom="2px solid"
+                                        borderColor="gray.600"
+                                        px={6}
+                                        py={3}
+                                        display="grid"
+                                        gridTemplateColumns="1fr 1fr"
+                                        alignItems="center"
+                                    >
+                                        <Flex justify="center">
+                                            <Tab
+                                                fontWeight="bold"
+                                                fontSize="sm"
+                                                _selected={{
+                                                    bg: "blue.600",
+                                                    color: "white",
+                                                    borderRadius: "md",
+                                                    boxShadow: "md",
+                                                }}
+                                                _hover={{
+                                                    bg: "gray.700",
+                                                    color: "white",
+                                                }}
+                                                px={6}
+                                                py={2}
+                                                transition="all 0.2s"
+                                            >
+                                                Price Chart
+                                            </Tab>
+                                        </Flex>
+
+                                        <Flex justify="center">
+                                            <Tab
+                                                fontWeight="bold"
+                                                fontSize="sm"
+                                                _selected={{
+                                                    bg: "green.500",
+                                                    color: "white",
+                                                    borderRadius: "md",
+                                                    boxShadow: "md",
+                                                }}
+                                                _hover={{
+                                                    bg: "gray.700",
+                                                    color: "white",
+                                                }}
+                                                px={6}
+                                                py={2}
+                                                transition="all 0.2s"
+                                            >
+                                                Position Chart
+                                            </Tab>
+                                        </Flex>
+                                    </TabList>
+                                </Box>
 
                                 <TabPanels>
                                     <TabPanel p={0} pt={4}>
-                                        <Box position="relative" width="100%">
+                                        <Box position="relative" width="100%" height="380px">
                                             <MarketCharts
                                                 chartData={chartData}
                                                 positionHistory={positionHistory}
@@ -1115,26 +1218,29 @@ function Customer({ contractAddress }: CustomerProps) {
                                     </TabPanel>
 
                                     <TabPanel p={0} pt={4}>
-                                        <MarketCharts
-                                            chartData={[]}
-                                            positionHistory={positionHistory}
-                                            positions={{ long: totalMarketPositions.long, short: totalMarketPositions.short }}
-                                            strikePrice={strikePrice}
-                                            timeRange={positionTimeRange}
-                                            chartType="position"
-                                            onTimeRangeChange={handleTimeRangeChange}
-                                            chartSymbol={chartSymbol}
-                                            biddingStartTime={biddingStartTime}
-                                            maturityTime={endTimestamp || (Math.floor(Date.now() / 1000) + 86400)}
-                                        />
+                                        <Box position="relative" width="100%" height="380px">
+                                            <MarketCharts
+                                                chartData={[]}
+                                                positionHistory={positionHistory}
+                                                positions={{ long: totalMarketPositions.long, short: totalMarketPositions.short }}
+                                                strikePrice={strikePrice}
+                                                timeRange={positionTimeRange}
+                                                chartType="position"
+                                                onTimeRangeChange={handleTimeRangeChange}
+                                                chartSymbol={chartSymbol}
+                                                biddingStartTime={biddingStartTime}
+                                                maturityTime={endTimestamp || (Math.floor(Date.now() / 1000) + 86400)}
+                                            />
+                                        </Box>
                                     </TabPanel>
                                 </TabPanels>
                             </Tabs>
 
                             {/* Rules Section */}
-                            <Box mt={8} border="1px solid #2D3748" borderRadius="xl" p={4}>
+                            <Box mt={6} border="1px solid #2D3748" borderRadius="xl" p={4} mb={6}>
                                 <Flex justify="space-between" align="center" onClick={() => setShowRules(!showRules)} cursor="pointer">
-                                    <Heading size="md" color="#F0F8FF" fontSize="25px">Rules:</Heading>
+                                    <Heading size="md" color="#F0F8FF" fontSize="25px">Rules</Heading>
+                                    <Icon as={showRules ? ChevronUpIcon : ChevronDownIcon} color="gray.400" boxSize="30px" />
                                 </Flex>
                                 {showRules && (
                                     <Box mt={4}>
@@ -1142,26 +1248,32 @@ function Customer({ contractAddress }: CustomerProps) {
                                             This is a binary option market where users can place bids on whether the price will be above (LONG) or below (SHORT) the strike price: {strikePrice} USD at maturity.
                                         </Text>
 
-                                        <Text color="gray.300" mt={2} mb={2}>The market goes through four phases: Trading, Bidding, Maturity, and Expiry.</Text>
+                                        <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Market Phases:</Text>
+                                        <UnorderedList color="gray.400" spacing={2} pl={5} mb={4}>
+                                            <ListItem><strong>Trading Phase:</strong> The market is visible but not yet open for bidding.</ListItem>
+                                            <ListItem><strong>Bidding Phase:</strong> Users can place LONG/SHORT bids with ICP.</ListItem>
+                                            <ListItem><strong>Maturity Phase:</strong> The final price is determined and the market outcome is resolved.</ListItem>
+                                            <ListItem><strong>Expiry Phase:</strong> Winners can claim rewards proportional to their bid amount.</ListItem>
+                                        </UnorderedList>
 
-                                        <Text color="gray.400" mb={4}>
-                                            During the Trading phase, users can view the market but cannot place bids. In the Bidding phase, users can place LONG or SHORT bids. At Maturity, the final price is determined and winners can claim their rewards. In the Expiry phase, the market is closed and all rewards are distributed.
-                                        </Text>
+                                        <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Yes/No Criteria:</Text>
+                                        <UnorderedList color="gray.400" spacing={2} pl={5} mb={4}>
+                                            <ListItem>Resolves to <strong>"Yes"</strong> (LONG wins) if the final price is strictly above {strikePrice} USD at maturity time.</ListItem>
+                                            <ListItem>Resolves to <strong>"No"</strong> (SHORT wins) if the final price is {strikePrice} USD or below at maturity time.</ListItem>
+                                        </UnorderedList>
 
-                                        <Text color="gray.400" mb={3}>
-                                            The potential profit depends on the ratio of LONG to SHORT bids. If more users bet against you, your potential profit increases. A fee of 6.8% is charged on all bids to maintain the platform.
-                                        </Text>
-
-                                        <Text color="gray.400" mb={3}>
-                                            Price data is sourced from cryptocurrency exchanges to ensure accurate and reliable market prices.
-                                        </Text>
+                                        <Text fontWeight="semibold" color="gray.300" mt={4} mb={2}>Resolution:</Text>
+                                        <UnorderedList color="gray.400" spacing={2} pl={5} mb={4}>
+                                            <ListItem>We will use the oracle price feed at the exact maturity time: {new Date((endTimestamp || 0) * 1000).toLocaleString()}.</ListItem>
+                                            <ListItem>Specifically, we will look at the closing USD value of {tradingPair} at that exact minute.</ListItem>
+                                        </UnorderedList>
                                     </Box>
                                 )}
                             </Box>
                         </Box>
 
                         {/* Right Side - Bid Panel and Market Info */}
-                        <Box width={{ base: "100%", md: "25%" }} mt={{ base: 4, md: 0 }} ml={{ base: 0, md: 4 }}>
+                        <Box width={{ base: "100%", md: "25%" }} mt={{ base: 4, md: 0 }} mr={0}>
                             {/* Strike Price */}
                             <Box
                                 bg="gray.800"
@@ -1206,7 +1318,7 @@ function Customer({ contractAddress }: CustomerProps) {
                                 bg="gray.800"
                                 p={4}
                                 borderRadius="xl"
-                                mb={4}
+                                mb={6}
                                 borderWidth={1}
                                 borderColor="gray.700"
                             >
@@ -1333,11 +1445,21 @@ function Customer({ contractAddress }: CustomerProps) {
                                         placeholder="Enter amount in ICP"
                                         bg="gray.800"
                                         color="white"
-                                        borderColor="gray.600"
-                                        borderRadius="md"
+                                        borderColor="blue.400"
+                                        borderWidth="1px"
+                                        borderRadius="full"
+                                        height="50px"
+                                        fontSize="md"
+                                        width="100%"
+                                        px={4}
                                         mb={3}
-                                        ml={2}
-                                        mr={2}
+                                        _hover={{
+                                            borderColor: "#63B3ED",
+                                        }}
+                                        _focus={{
+                                            borderColor: "#FEDF56",
+                                            boxShadow: "0 0 0 1px #FEDF56",
+                                        }}
                                         value={bidAmount}
                                         onChange={(e) => {
                                             const value = e.target.value;
@@ -1369,34 +1491,25 @@ function Customer({ contractAddress }: CustomerProps) {
                                 <Text fontSize="sm" color="gray.400" mb={1}>Pot. profit: {totalDeposited > 0 ? "0.0000 -> 0.0000 ICP" : "N/A"}</Text>
                                 <Text fontSize="sm" color="gray.400" mb={4}>Fee: 6.8%</Text>
 
-                                <Text fontSize="md" fontWeight="bold" color="white" mb={2}>Your Position</Text>
-                                <HStack justify="space-between" mb={1}>
-                                    <Text color="#56ff56">LONG:</Text>
-                                    <Text color="white">{positions.long.toFixed(4)} ICP</Text>
-                                </HStack>
-                                <HStack justify="space-between">
-                                    <Text color="#FF6B81">SHORT:</Text>
-                                    <Text color="white">{positions.short.toFixed(4)} ICP</Text>
-                                </HStack>
-                            </Box>
-
-                            <Box
-                                bg="gray.800"
-                                p={4}
-                                borderRadius="xl"
-                                borderWidth={1}
-                                borderColor="gray.700"
-                            >
-                                <Text fontSize="md" fontWeight="bold" color="white" mb={3}>My Holdings</Text>
-                                <Button
-                                    colorScheme="blue"
-                                    variant="outline"
-                                    size="sm"
-                                    width="100%"
-                                    rightIcon={<FaArrowDown />}
+                                {/* Your Position */}
+                                <Box
+                                    bg="#0A0B0E"
+                                    p={4}
+                                    borderRadius="xl"
+                                    borderWidth={1}
+                                    borderColor="rgba(255, 255, 255, 0.05)"
+                                    mb={6}
                                 >
-                                    Make your first Prediction Market
-                                </Button>
+                                    <Text fontSize="md" fontWeight="bold" color="#FEDF56" mb={2}>Your Position</Text>
+                                    <HStack justify="space-between" mb={1}>
+                                        <Text color="#56ff56">LONG:</Text>
+                                        <Text color="white">{positions.long.toFixed(4)} ICP</Text>
+                                    </HStack>
+                                    <HStack justify="space-between">
+                                        <Text color="#FF6B81">SHORT:</Text>
+                                        <Text color="white">{positions.short.toFixed(4)} ICP</Text>
+                                    </HStack>
+                                </Box>
                             </Box>
 
                             {/* Market Timeline */}
@@ -1404,13 +1517,12 @@ function Customer({ contractAddress }: CustomerProps) {
                                 bg="#222530"
                                 p={4}
                                 borderWidth={1}
-                                borderColor="gray.700"
+                                borderColor="rgba(255, 255, 255, 0.05)"
                                 borderRadius="30px"
                                 position="relative"
                                 height="320px"
-                                mb={4}
                             >
-                                <Text fontSize="2xl" fontWeight="bold" mb={4} mt={2} color="#gray.600" textAlign="center">
+                                <Text fontSize="2xl" fontWeight="bold" mb={4} mt={2} color="white" textAlign="center">
                                     Market is Live
                                 </Text>
 
@@ -1419,7 +1531,7 @@ function Customer({ contractAddress }: CustomerProps) {
                                     p={4}
                                     borderRadius="30px"
                                     borderWidth={1}
-                                    borderColor="gray.700"
+                                    borderColor="rgba(255, 255, 255, 0.05)"
                                     position="absolute"
                                     top="70px"
                                     left="0"
@@ -1434,20 +1546,20 @@ function Customer({ contractAddress }: CustomerProps) {
                                             top="30px"
                                             bottom="20px"
                                             width="2px"
-                                            bg="gray.700"
+                                            bg="rgba(255, 255, 255, 0.1)"
                                             zIndex={0}
                                         />
 
                                         {/* Trading Phase */}
                                         <HStack spacing={4}>
-                                            <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">
+                                            <Circle size="35px" bg={currentPhase >= Phase.Bidding ? "#4A63C8" : "rgba(255, 255, 255, 0.1)"} color="white" zIndex={1} fontWeight="bold">
                                                 {currentPhase >= Phase.Bidding ? <CheckIcon boxSize={4} /> : '1'}
                                             </Circle>
                                             <VStack align="start" spacing={0} fontWeight="bold">
-                                                <Text fontSize="lg" color={currentPhase === Phase.Trading ? "green.400" : "gray.500"}>
+                                                <Text fontSize="lg" color={currentPhase === Phase.Trading ? "#56ff56" : "rgba(255, 255, 255, 0.5)"}>
                                                     Trading
                                                 </Text>
-                                                <Text fontSize="xs" color="gray.500">
+                                                <Text fontSize="xs" color="rgba(255, 255, 255, 0.5)">
                                                     {endTimestamp ? new Date((Number(endTimestamp) - 86400) * 1000).toLocaleString() : 'Pending'}
                                                 </Text>
                                             </VStack>
@@ -1491,14 +1603,14 @@ function Customer({ contractAddress }: CustomerProps) {
 
                                         {/* Bidding Phase */}
                                         <HStack spacing={4}>
-                                            <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">
+                                            <Circle size="35px" bg={currentPhase >= Phase.Maturity ? "#4A63C8" : "rgba(255, 255, 255, 0.1)"} color="white" zIndex={1} fontWeight="bold">
                                                 {currentPhase >= Phase.Maturity ? <CheckIcon boxSize={4} /> : '2'}
                                             </Circle>
                                             <VStack align="start" spacing={0} fontWeight="bold">
-                                                <Text fontSize="lg" color={currentPhase === Phase.Bidding ? "blue.400" : "gray.500"}>
+                                                <Text fontSize="lg" color={currentPhase === Phase.Bidding ? "#4A63C8" : "rgba(255, 255, 255, 0.5)"}>
                                                     Bidding
                                                 </Text>
-                                                <Text fontSize="xs" color="gray.500">
+                                                <Text fontSize="xs" color="rgba(255, 255, 255, 0.5)">
                                                     {endTimestamp ? new Date((Number(endTimestamp) - 43200) * 1000).toLocaleString() : 'Waiting'}
                                                 </Text>
                                             </VStack>
@@ -1530,14 +1642,14 @@ function Customer({ contractAddress }: CustomerProps) {
                                         {/* Maturity Phase */}
                                         <HStack spacing={4} justify="space-between">
                                             <HStack spacing={4}>
-                                                <Circle size="35px" bg="blue.400" color="black" zIndex={1} fontWeight="bold">
+                                                <Circle size="35px" bg={currentPhase >= Phase.Expiry ? "#4A63C8" : "rgba(255, 255, 255, 0.1)"} color="white" zIndex={1} fontWeight="bold">
                                                     {currentPhase >= Phase.Expiry ? <CheckIcon boxSize={4} /> : '3'}
                                                 </Circle>
                                                 <VStack align="start" spacing={0} fontWeight="bold">
-                                                    <Text fontSize="lg" color={currentPhase === Phase.Maturity ? "orange.400" : "gray.500"}>
+                                                    <Text fontSize="lg" color={currentPhase === Phase.Maturity ? "#FEDF56" : "rgba(255, 255, 255, 0.5)"}>
                                                         Maturity
                                                     </Text>
-                                                    <Text fontSize="xs" color="gray.500">
+                                                    <Text fontSize="xs" color="rgba(255, 255, 255, 0.5)">
                                                         {endTimestamp ? new Date(Number(endTimestamp) * 1000).toLocaleString() : 'Pending'}
                                                     </Text>
                                                 </VStack>

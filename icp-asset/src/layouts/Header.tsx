@@ -148,6 +148,7 @@ export default function Header() {
                   bgColor={isActive(item.path) ? "rgba(74, 99, 200, 0.2)" : "transparent"}
                   borderRadius="md"
                   px={4}
+                  fontSize="md"
                   _hover={{ bgColor: "rgba(255, 255, 255, 0.05)", color: "white" }}
                   onClick={() => {
                     navigateTo(item.path);
@@ -186,12 +187,12 @@ export default function Header() {
                   </VStack>
                 ) : (
                   <Button
-                    colorScheme="blue"
+                    bg="#4a63c8"
+                    color="white"
                     size="md"
                     w="full"
                     onClick={handleLogin}
-                    bg="rgba(74, 99, 200, 0.8)"
-                    _hover={{ bg: "rgba(106, 131, 232, 0.8)" }}
+                    _hover={{ bg: "#5a73d8" }}
                   >
                     Log In with Internet Identity
                   </Button>
@@ -244,15 +245,15 @@ export default function Header() {
                 onClick={() => navigateTo(item.path)}
                 transition="all 0.2s"
               >
-                <Text>{item.name}</Text>
+                <Text fontSize="md">{item.name}</Text>
                 {isActive(item.path) && (
                   <Box
                     position="absolute"
-                    bottom="-16px"
+                    bottom="-2px"
                     left="0"
-                    right="0"
-                    height="3px"
-                    bgGradient="linear(to-r, #4a63c8, #5a73d8)"
+                    width="100%"
+                    height="2px"
+                    bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
                     borderRadius="full"
                   />
                 )}
@@ -260,40 +261,33 @@ export default function Header() {
             ))}
           </HStack>
 
-          {/* Login/Identity Section */}
-          <Flex alignItems="center" width="180px" justifyContent="flex-end">
+          {/* Authentication */}
+          <HStack spacing={4} justify="flex-end" minW="200px">
             {isAuthenticated ? (
               <Menu>
                 <MenuButton
                   as={Button}
-                  size="sm"
                   variant="outline"
-                  rightIcon={<ChevronDownIcon />}
-                  display={{ base: 'none', md: 'flex' }}
-                  colorScheme="blue"
+                  size="sm"
+                  borderColor="rgba(255, 255, 255, 0.2)"
                   color="white"
-                  borderColor="rgba(255, 255, 255, 0.3)"
-                  _hover={{
-                    borderColor: "blue.400",
-                    bg: "rgba(66, 153, 225, 0.1)"
-                  }}
-                  _active={{
-                    borderColor: "blue.500",
-                    bg: "rgba(66, 153, 225, 0.2)"
-                  }}
+                  _hover={{ bg: "rgba(255, 255, 255, 0.1)" }}
+                  rightIcon={<ChevronDownIcon />}
+                  bg="rgba(0, 0, 0, 0.2)"
                 >
-                  <Text fontSize="sm" maxW="150px" isTruncated>
+                  <Text fontSize="sm" isTruncated maxWidth="140px">
                     {userPrincipal
-                      ? `User: ${userPrincipal.substring(0, 5)}...${userPrincipal.substring(userPrincipal.length - 3)}`
+                      ? `${userPrincipal.substring(0, 6)}...${userPrincipal.substring(userPrincipal.length - 4)}`
                       : "Account"}
                   </Text>
                 </MenuButton>
-                <MenuList bg="#0F1F3C" borderColor="rgba(255, 255, 255, 0.1)">
+                <MenuList bg="#0a1647" borderColor="rgba(255, 255, 255, 0.1)">
                   <MenuItem
-                    bg="#0F1F3C"
+                    bg="#0a1647"
                     color="white"
-                    _hover={{ bg: "rgba(66, 153, 225, 0.2)" }}
+                    _hover={{ bg: "rgba(255, 255, 255, 0.1)" }}
                     onClick={handleLogout}
+                    fontSize="sm"
                   >
                     Log Out
                   </MenuItem>
@@ -301,20 +295,22 @@ export default function Header() {
               </Menu>
             ) : (
               <Button
-                colorScheme="blue"
-                size="sm"
                 onClick={handleLogin}
-                display={{ base: 'none', md: 'flex' }}
-                bg="rgba(74, 99, 200, 0.8)"
-                _hover={{ bg: "rgba(106, 131, 232, 0.8)" }}
+                bg="#4a63c8"
+                color="white"
+                size="sm"
+                _hover={{ bg: "#5a73d8" }}
+                borderRadius="md"
+                fontSize="sm"
+                fontWeight="medium"
               >
                 Log In
               </Button>
             )}
+          </HStack>
 
-            {/* Mobile Navigation */}
-            <MobileNav />
-          </Flex>
+          {/* Mobile menu button */}
+          <MobileNav />
         </Flex>
       </Container>
     </Box>

@@ -743,9 +743,11 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
             {/* Application header with search and wallet info */}
             <Flex
                 as="header"
-                align="center"
                 justify="space-between"
-                p={4}
+                align="center"
+                px={6}
+                py={4}
+                height="80px"
                 bg="#0A0B0E"
                 borderBottom="1px"
                 borderColor="gray.700"
@@ -754,114 +756,122 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                 zIndex="sticky"
                 boxShadow="sm"
             >
-                {/* Left group: Logo + Search */}
+                {/* Left group: Logo */}
                 <HStack spacing={6}>
-                    <Text
-                        fontSize="5xl"
-                        fontWeight="bold"
-                        bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
-                        bgClip="text"
-                        letterSpacing="wider"
-                        textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
-                        fontFamily="'Orbitron', sans-serif"
-                    >
-                        OREKA
-                    </Text>
-
-                    {/* Search input */}
-                    <Box position="relative" maxW="600px" w="100%" height="50px" display="flex" alignItems="center">
-                        <InputGroup ml="50px" w="500px" height="50px">
-                            <Input
-                                placeholder="Search OREKA"
-                                value={searchQuery}
-                                onChange={(e) => {
-                                    const value = e.target.value;
-                                    setSearchQuery(value);
-                                    if (value.trim() === '') {
-                                        setSearchResults([]);
-                                    } else {
-                                        const results = filterContractsByQuery(value);
-                                        setSearchResults(results);
-                                    }
-                                }}
-                                bg="#1A1C21"
-                                color="white"
-                                borderColor="gray.600"
-                                borderRadius="3xl"
-                                fontSize="md"
-                                py={6}
-                                px={4}
-                                boxShadow="0 4px 10px rgba(0, 0, 0, 0.2)"
-                                _placeholder={{ color: 'gray.400' }}
-                                _focus={{ borderColor: 'yellow.400', boxShadow: '0 0 0 2px rgba(254, 223, 86, 0.6)' }}
-                                _hover={{ borderColor: 'yellow.300' }}
-                            />
-                            <InputRightElement pointerEvents="none" height="90%" pr={4} mr="5px" mt="1px" mb="1px"
-                                children={<Icon as={FaSearch} color="gray.400" />}
-                                bg="#1A1C21"
-                                borderColor="gray.600"
-                                borderRadius="3xl"
-                            />
-                        </InputGroup>
-
-                        {/* Search results */}
-                        {searchResults.length > 0 && (
-                            <Box
-                                position="absolute"
-                                top="60px"
-                                left="0"
-                                width="100%"
-                                bg="gray.900"
-                                borderRadius="lg"
-                                boxShadow="xl"
-                                zIndex="dropdown"
-                                maxHeight="300px"
-                                overflowY="auto"
-                                border="1px solid"
-                                borderColor="gray.700"
-                            >
-                                {searchResults.slice(0, 6).map((contract) => {
-                                    const tradingPair = contract.tradingPair || "";
-                                    const address = contract.address;
-                                    const baseToken = tradingPair.split('/')[0]?.toLowerCase();
-                                    const imageIndex = contractImageIndices?.[address] || 1;
-                                    const imageSrc = `/images/${baseToken}/${baseToken}${imageIndex}.png`;
-
-                                    return (
-                                        <Box
-                                            key={address}
-                                            display="flex"
-                                            alignItems="center"
-                                            px={4}
-                                            py={3}
-                                            _hover={{ bg: "gray.700", cursor: "pointer" }}
-                                            onClick={() => {
-                                                handleContractClick(contract.address);
-                                                setSearchQuery('');
-                                                setSearchResults([]);
-                                            }}
-                                        >
-                                            <Image
-                                                src={imageSrc}
-                                                alt="token"
-                                                boxSize="32px"
-                                                borderRadius="full"
-                                                mr={4}
-                                                fallbackSrc="/images/default-token.png"
-                                            />
-                                            <Text fontSize="sm" fontWeight="medium" color="white">
-                                                {cleanupMarketTitle(getMarketTitle(contract))}
-                                            </Text>
-                                        </Box>
-                                    );
-                                })}
-                            </Box>
-                        )}
+                    <Box display="flex" alignItems="center">
+                        <Text
+                            fontSize="5xl"
+                            fontWeight="bold"
+                            bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
+                            bgClip="text"
+                            letterSpacing="wider"
+                            textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
+                            fontFamily="'Orbitron', sans-serif"
+                        >
+                            OREKA
+                        </Text>
                     </Box>
                 </HStack>
 
-                {/* Right group: Wallet info */}
-                <HStack spacing={4}>
+                {/* Center: Search */}
+                <Box position="relative" maxW="600px" w="100%" height="50px" display="flex" alignItems="center">
+                    <Box position="relative" w="500px" height="50px">
+                        <Input
+                            placeholder="Search OREKA"
+                            value={searchQuery}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                setSearchQuery(value);
+                                if (value.trim() === '') {
+                                    setSearchResults([]);
+                                } else {
+                                    const results = filterContractsByQuery(value);
+                                    setSearchResults(results);
+                                }
+                            }}
+                            bg="#1A1C21"
+                            color="white"
+                            borderColor="gray.600"
+                            borderRadius="3xl"
+                            fontSize="md"
+                            py={6}
+                            px={4}
+                            paddingRight="40px"
+                            boxShadow="0 4px 10px rgba(0, 0, 0, 0.2)"
+                            _placeholder={{ color: 'gray.400' }}
+                            _focus={{ borderColor: 'yellow.400', boxShadow: '0 0 0 2px rgba(254, 223, 86, 0.6)' }}
+                            _hover={{ borderColor: 'yellow.300' }}
+                            height="50px"
+                            width="100%"
+                        />
+                        <Box
+                            position="absolute"
+                            right="16px"
+                            top="50%"
+                            transform="translateY(-50%)"
+                            pointerEvents="none"
+                        >
+                            <Icon as={FaSearch} color="gray.400" />
+                        </Box>
+                    </Box>
+
+                    {/* Search results */}
+                    {searchResults.length > 0 && (
+                        <Box
+                            position="absolute"
+                            top="60px"
+                            left="0"
+                            width="100%"
+                            bg="gray.900"
+                            borderRadius="lg"
+                            boxShadow="xl"
+                            zIndex="dropdown"
+                            maxHeight="300px"
+                            overflowY="auto"
+                            border="1px solid"
+                            borderColor="gray.700"
+                        >
+                            {searchResults.slice(0, 6).map((contract) => {
+                                const tradingPair = contract.tradingPair || "";
+                                const address = contract.address;
+                                const baseToken = tradingPair.split('/')[0]?.toLowerCase();
+                                const imageIndex = contractImageIndices?.[address] || 1;
+                                const imagePath = `/images/${baseToken}/${baseToken}${imageIndex.toString()}.png`;
+
+                                return (
+                                    <Box
+                                        key={address}
+                                        display="flex"
+                                        alignItems="center"
+                                        px={4}
+                                        py={3}
+                                        _hover={{ bg: "gray.700", cursor: "pointer" }}
+                                        onClick={() => {
+                                            handleContractClick(contract.address);
+                                            setSearchQuery('');
+                                            setSearchResults([]);
+                                        }}
+                                    >
+                                        <Image
+                                            src={imagePath}
+                                            alt="token"
+                                            boxSize="32px"
+                                            borderRadius="full"
+                                            mr={4}
+                                            fallbackSrc="/images/default-token.png"
+                                        />
+                                        <Text fontSize="sm" fontWeight="medium" color="white">
+                                            {cleanupMarketTitle(getMarketTitle(contract))}
+                                        </Text>
+                                    </Box>
+                                );
+                            })}
+                        </Box>
+                    )}
+                </Box>
+
+                {/* Right group: Deploy Markets + Wallet info */}
+                <HStack spacing={6}>
                     <Box
                         mr="10px"
                         borderRadius="md"
@@ -882,6 +892,9 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                             }}
                             boxShadow="0 4px 8px rgba(0, 0, 0, 0.2)"
                             transition="all 0.2s"
+                            px={5}
+                            py={2}
+                            h="40px"
                         >
                             Deploy Markets
                         </Button>

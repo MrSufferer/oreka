@@ -1129,239 +1129,179 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
       {/* Application header with wallet connection status */}
       <Flex
         as="header"
-        align="center"
         justify="space-between"
-        p={4}
+        align="center"
+        px={6}
+        py={4}
+        height="80px"
         bg="#0A0B0E"
         borderBottom="1px"
-        borderColor="gray.200"
+        borderColor="gray.700"
         position="sticky"
         top="0"
         zIndex="sticky"
         boxShadow="sm"
       >
-        {/* Left group: Logo + Search */}
+        {/* Left group: Logo */}
         <HStack spacing={6}>
-          <Text
-            fontSize="5xl"
-            fontWeight="bold"
-            bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
-            bgClip="text"
-            letterSpacing="wider"
-            textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
-            fontFamily="'Orbitron', sans-serif"
-          >
-            OREKA
-          </Text>
-
-          {/* Search input */}
-          <Box position="relative" maxW="600px" w="100%" height="50px" display="flex" alignItems="center">
-            <InputGroup ml="50px" w="500px" height="50px">
-              <Input
-                placeholder="Search OREKA"
-                value={searchQuery}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setSearchQuery(value);
-                  if (value.trim() === '') {
-                    setSearchResults([]);
-                  } else {
-                    const results = filterContractsByQuery(value);
-                    setSearchResults(results);
-                  }
-                }}
-                bg="#1A1C21"
-                color="white"
-                borderColor="gray.600"
-                borderRadius="3xl"
-                fontSize="md"
-                py={6}
-                px={4}
-                boxShadow="0 4px 10px rgba(0, 0, 0, 0.2)"
-                _placeholder={{ color: 'gray.400' }}
-                _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 2px rgba(66, 153, 225, 0.6)' }}
-                _hover={{ borderColor: 'blue.300' }}
-              />
-              <InputRightElement pointerEvents="none" height="90%" pr={4} mr="5px" mt="1px" mb="1px"
-                children={<Icon as={FaSearch} color="gray.400" />}
-                bg="#1A1C21"
-                borderColor="gray.600"
-                borderRadius="3xl"
-              />
-            </InputGroup>
-
-            {/* Search results */}
-            {searchResults.length > 0 && (
-              <Box
-                position="absolute"
-                top="60px"
-                left="0"
-                width="100%"
-                bg="gray.900"
-                borderRadius="lg"
-                boxShadow="xl"
-                zIndex="dropdown"
-                maxHeight="300px"
-                overflowY="auto"
-                border="1px solid"
-                borderColor="gray.700"
-              >
-                {searchResults.slice(0, 6).map((contract) => {
-                  const tradingPair = contract.tradingPair || "";
-                  const address = contract.address;
-                  const baseToken = tradingPair.split('/')[0]?.toLowerCase();
-
-                  // Ensure we have a valid index even if contractImageIndices is not fully loaded yet
-                  const imageIndex = contractImageIndices?.[address] ||
-                    (contract.indexBg ? parseInt(contract.indexBg) : 1);
-
-                  // Make sure we have a valid path and fallback if the specific image doesn't exist
-                  const imageSrc = `/images/${baseToken}/${baseToken}${imageIndex}.png`;
-
-                  return (
-                    <Box
-                      key={address}
-                      display="flex"
-                      alignItems="center"
-                      px={4}
-                      py={3}
-                      _hover={{ bg: "gray.700", cursor: "pointer" }}
-                      onClick={() => {
-                        handleAddressClick(contract.address, contract.owner, contract);
-                        setSearchQuery('');
-                        setSearchResults([]);
-                      }}
-                    >
-                      <Image
-                        src={imageSrc}
-                        alt={tradingPair}
-                        boxSize="32px"
-                        borderRadius="full"
-                        mr={4}
-                        fallbackSrc="/images/default-token.png"
-                        onError={(e) => {
-                          // If image fails to load, try a different index or use default
-                          e.currentTarget.src = `/images/default-token.png`;
-                        }}
-                      />
-                      <Text fontSize="sm" fontWeight="medium" color="white">
-                        {getMarketTitleJSX(contract)}
-                      </Text>
-                    </Box>
-                  );
-                })}
-              </Box>
-            )}
+          <Box display="flex" alignItems="center">
+            <Text
+              fontSize="5xl"
+              fontWeight="bold"
+              bgGradient="linear(to-r, #4a63c8, #5a73d8, #6a83e8)"
+              bgClip="text"
+              letterSpacing="wider"
+              textShadow="0 0 10px rgba(74, 99, 200, 0.7), 0 0 20px rgba(74, 99, 200, 0.5)"
+              fontFamily="'Orbitron', sans-serif"
+            >
+              OREKA
+            </Text>
           </Box>
-
         </HStack>
 
-        {/* Right group: Wallet info */}
+        {/* Center: Search */}
+        <Box position="relative" maxW="600px" w="100%" height="50px" display="flex" alignItems="center">
+          <InputGroup w="500px" height="50px">
+            <Input
+              placeholder="Search OREKA"
+              value={searchQuery}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSearchQuery(value);
+                if (value.trim() === '') {
+                  setSearchResults([]);
+                } else {
+                  const filtered = filterContractsByQuery(value);
+                  setSearchResults(filtered);
+                }
+              }}
+              bg="#1A1C21"
+              color="white"
+              borderColor="gray.600"
+              borderRadius="3xl"
+              fontSize="md"
+              py={6}
+              px={4}
+              boxShadow="0 4px 10px rgba(0, 0, 0, 0.2)"
+              _placeholder={{ color: 'gray.400' }}
+              _focus={{ borderColor: 'yellow.400', boxShadow: '0 0 0 2px rgba(254, 223, 86, 0.6)' }}
+              _hover={{ borderColor: 'yellow.300' }}
+            />
+            <InputRightElement pointerEvents="none" height="90%" pr={4} mr="5px" mt="1px" mb="1px"
+              children={<Icon as={FaSearch} color="gray.400" />}
+              bg="#1A1C21"
+              borderColor="gray.600"
+              borderRadius="3xl"
+            />
+          </InputGroup>
+
+          {/* Search results */}
+          {searchResults.length > 0 && (
+            <Box
+              position="absolute"
+              top="60px"
+              left="0"
+              width="100%"
+              bg="gray.900"
+              borderRadius="lg"
+              boxShadow="xl"
+              zIndex="dropdown"
+              maxHeight="300px"
+              overflowY="auto"
+              border="1px solid"
+              borderColor="gray.700"
+            >
+              {searchResults.slice(0, 6).map((contract) => {
+                const tradingPair = contract.tradingPair;
+                const title = marketTitles[contract.address] || tradingPair;
+                const baseToken = tradingPair?.split('/')[0]?.toLowerCase();
+                const imageIndex = Math.floor(Math.random() * 5) + 1;
+                const imagePath = `/images/${baseToken}/${baseToken}${imageIndex.toString()}.png`;
+
+                return (
+                  <Box
+                    key={contract.address}
+                    display="flex"
+                    alignItems="center"
+                    px={4}
+                    py={3}
+                    _hover={{ bg: "gray.700", cursor: "pointer" }}
+                    onClick={() => {
+                      handleAddressClick(contract.address, contract.owner, contract as ContractData);
+                      setSearchQuery('');
+                      setSearchResults([]);
+                    }}
+                  >
+                    <Image
+                      src={imagePath}
+                      alt="token"
+                      boxSize="32px"
+                      borderRadius="full"
+                      mr={4}
+                      fallbackSrc="/images/default-token.png"
+                    />
+                    <Text fontSize="sm" fontWeight="medium" color="white">
+                      {title}
+                    </Text>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+        </Box>
+
+        {/* Right group: Deploy Markets + Wallet info */}
         {isConnected ? (
           <HStack spacing={4}>
             <Box
               mr="10px"
-              bg="#1A1C21"
-              borderRadius="3xl"
-              border="1px solid transparent"
-              backgroundImage="linear-gradient(to right, #00B894, #00A8FF)"
-              boxShadow="0 4px 10px rgba(0, 0, 0, 0.3)"
+              borderRadius="md"
+              overflow="hidden"
             >
               <Button
-                leftIcon={<GrDeploy />}
                 variant="solid"
                 color="white"
-                bg="#1A1C21"
-                borderRadius="3xl"
-                onClick={() => router.push('/owner')}
+                bgGradient="linear(to-r, #3182CE, #63B3ED)"
+                borderRadius="md"
+                onClick={() => router.push('/factory')}
                 _hover={{
-                  bg: 'rgba(0, 183, 148, 0.8)',
-                  color: 'white',
+                  bgGradient: "linear(to-r, #2B6CB0, #4299E1)",
                   transform: 'scale(1.05)',
                 }}
                 _active={{
                   transform: 'scale(0.95)',
                 }}
+                boxShadow="0 4px 8px rgba(0, 0, 0, 0.2)"
+                transition="all 0.2s"
               >
                 Deploy Markets
               </Button>
             </Box>
-            <Box
-              p="2px"
+            <HStack
+              p={2}
+              bg="#1A1C21"
               borderRadius="md"
-              bg="transparent"
-              sx={{
-                backgroundImage: "linear-gradient(270deg, #ff0059, #5a73d8, #5858b5 , #77efef, #4a63c8)",
-                backgroundSize: "400% 400%",
-                animation: "gradient-border 8s ease infinite",
-                borderRadius: "8px"
-              }}
+              borderWidth="1px"
+              borderColor="gray.700"
             >
-              <HStack
-                p={2}
-                bg="#1A1C21"
-                borderRadius="md"
-                w="full"
-              >
-                <Text color="white" fontWeight="medium">
-                  {parseFloat(balance).toFixed(4)} ETH
-                </Text>
-              </HStack>
-
-              {/* Inject CSS animation */}
-              <style jsx>{`
-                  @keyframes gradient-border {
-                    0% { background-position: 0% 50%; }
-                    50% { background-position: 100% 50%; }
-                    100% { background-position: 0% 50%; }
-                  }
-                `}
-              </style>
-            </Box>
-
-            <Box
-              p="2px"
-              borderRadius="md"
-              sx={{
-                backgroundImage: "linear-gradient(270deg, #eaea72, #f49a24, #e25375, #f2f2bf, #f2f2cd)",
-                backgroundSize: "400% 400%",
-                animation: "gradient-border 6s ease infinite",
-                display: "inline-block",
-                borderRadius: "8px",
-              }}
+              <Icon as={FaEthereum} color="#63B3ED" />
+              <Text color="#63B3ED" fontWeight="medium">
+                {parseFloat(balance).toFixed(4)} ETH
+              </Text>
+            </HStack>
+            <Button
+              colorScheme="blue"
+              variant="outline"
+              size="md"
             >
-              <Button
-                variant="ghost"
-                size="md"
-                bg="#1A1C21"
-                color="white"
-                borderRadius="md"
-                _hover={{
-                  bg: "transparent",
-                  transform: "scale(1.03)",
-                }}
-                _active={{
-                  bg: "transparent"
-                }}
-              >
-                {shortenAddress(walletAddress)}
-              </Button>
-
-              {/* Inject animation for the border */}
-              <style jsx>{`
-                  @keyframes gradient-border {
-                    0% { background-position: 0% 50%; }
-                    50% { background-position: 100% 50%; }
-                    100% { background-position: 0% 50%; }
-                  }
-                `}
-              </style>
-            </Box>
+              {shortenAddress(walletAddress)}
+            </Button>
           </HStack>
         ) : (
           <Button
             leftIcon={<FaWallet />}
-            colorScheme="white"
+            colorScheme="blue"
+            variant="solid"
             size="md"
             onClick={connectWallet}
           >
@@ -1386,7 +1326,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                 height: '8px',
               },
               '&::-webkit-scrollbar-thumb': {
-                backgroundColor: 'rgba(0,0,0,0.1)',
+                backgroundColor: 'rgba(100,149,237,0.2)',
                 borderRadius: '4px',
               }
             }}
@@ -1471,7 +1411,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             spacing={4}
             width="100%"
           >
-            {filteredContracts.map(({ address, createDate, longAmount, shortAmount, phase, maturityTime, tradingPair, owner }, index) => (
+            {filteredContracts.map(({ address, createDate, longAmount, shortAmount, phase, maturityTime, tradingPair, owner, strikePrice }, index) => (
 
               <Box
                 key={index}
@@ -1493,7 +1433,8 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                       createDate,
                       longAmount,
                       shortAmount,
-                      phase,
+                      strikePrice: strikePrice || "0", // Use existing strikePrice or default
+                      phase: Number(phase),
                       maturityTime,
                       tradingPair,
                       owner,
@@ -1514,7 +1455,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
                   >
                     <Image
-                      src={`/images/${tradingPair.split('/')[0].toLowerCase()}/${tradingPair.split('/')[0].toLowerCase()}${contractImageIndices[address] || 1}.png`}
+                      src={`/images/${tradingPair.split('/')[0].toLowerCase()}/${tradingPair.split('/')[0].toLowerCase()}${contractImageIndices[address]?.toString() || '1'}.png`}
                       alt={tradingPair}
                       w="100%"
                       h="100%"
@@ -1524,7 +1465,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     />
                     <Box
                       display="inline-block"
-                      bg={getPhaseColor(parseInt(phase))}
+                      bg={getPhaseColor(Number(phase))}
                       color="white"
                       px={3}
                       py={1}
@@ -1536,7 +1477,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                       bottom="3px"
                       left="7px"
                     >
-                      {getPhaseName(parseInt(phase))}
+                      {getPhaseName(Number(phase))}
                     </Box>
                   </Box>
 

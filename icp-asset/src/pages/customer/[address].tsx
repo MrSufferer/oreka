@@ -25,7 +25,7 @@ const CustomerPage = () => {
     }
 
     return (
-        <Box pt={4} pb={10}>
+        <Box pt={4} pb={10} px={0}>
             <Customer contractAddress={address as string} />
         </Box>
     );
