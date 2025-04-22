@@ -638,7 +638,17 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
         this.assertInitialized();
 
         try {
+            console.log("Attempting to call getPositionHistory on canister");
+            // Check if the method exists before calling it
+            if (typeof this.actor.getPositionHistory !== 'function') {
+                console.log("getPositionHistory method does not exist on the canister");
+                return [];
+            }
+
             const history = await this.actor.getPositionHistory();
+            console.log("Raw position history response:", JSON.stringify(history, (key, value) =>
+                typeof value === 'bigint' ? value.toString() : value
+            ));
 
             if (!history || !Array.isArray(history) || history.length === 0) {
                 console.log("No position history returned from canister");
@@ -646,20 +656,35 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
             }
 
             // Convert canister format to frontend format with percentages
-            return history.map(point => {
+            const formattedHistory = history.map(point => {
                 const timestamp = Number(point.timestamp) / 1000000000; // Convert nano to seconds
-                const longAmount = BigInt(point.longAmount);
-                const shortAmount = BigInt(point.shortAmount);
+                const longAmount = typeof point.longAmount === 'bigint' ? point.longAmount : BigInt(point.longAmount);
+                const shortAmount = typeof point.shortAmount === 'bigint' ? point.shortAmount : BigInt(point.shortAmount);
+
+                const longPercentage = this.calculatePercentage(longAmount, shortAmount, true);
+                const shortPercentage = this.calculatePercentage(longAmount, shortAmount, false);
+
+                console.log(`Point at ${new Date(timestamp * 1000).toISOString()}: Long=${longPercentage}%, Short=${shortPercentage}%`);
 
                 return {
                     timestamp,
-                    longPercentage: this.calculatePercentage(longAmount, shortAmount, true),
-                    shortPercentage: this.calculatePercentage(longAmount, shortAmount, false),
+                    longPercentage,
+                    shortPercentage,
                     isMainPoint: true
                 };
             });
+
+            console.log(`Processed ${formattedHistory.length} history points with timestamps`);
+            return formattedHistory;
         } catch (error) {
             console.error("Error fetching position history:", error);
+            // Check the specific error to provide better feedback
+            if (error instanceof Error) {
+                if (error.message.includes("has no update method") ||
+                    error.message.includes("has no query method")) {
+                    console.log("The canister does not implement getPositionHistory method. This is expected for older canisters.");
+                }
+            }
             return [];
         }
     }

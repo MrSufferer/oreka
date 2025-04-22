@@ -139,10 +139,15 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
         // Throttled update function to prevent excessive re-renders
         const throttledUpdate = () => {
             if (positionHistory.length > 0) {
+                console.log("Position history from props:", positionHistory.length, "points");
                 // Filter position history to only show data up to current time
                 positionHistoryRef.current = positionHistory.filter(point =>
                     point.timestamp <= currentTime
                 );
+                console.log("Filtered to", positionHistoryRef.current.length, "points up to current time");
+            } else {
+                console.log("No position history data available from props");
+                positionHistoryRef.current = [];
             }
 
             // Generate enhanced data with interpolated points for smoother charts
@@ -153,6 +158,10 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
                 currentTime,
                 positions
             );
+
+            console.log("Enhanced data points generated:", enhancedData.length);
+            console.log("First point:", enhancedData[0]);
+            console.log("Last point:", enhancedData[enhancedData.length - 1]);
 
             setEnhancedPositionData(enhancedData);
         };
@@ -195,11 +204,11 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
 
         // Calculate time interval between ticks
         const duration = effectiveMaturityTime - effectiveBiddingStartTime;
-        const interval = Math.max(Math.floor(duration / 5), 1);
+        const interval = Math.max(Math.floor(duration / 3), 1); // Use just 4 ticks (start, 2 middle points, end)
         const ticks = [];
 
-        // Create evenly spaced ticks
-        for (let i = 0; i <= 5; i++) {
+        // Create more widely spaced ticks
+        for (let i = 0; i <= 3; i++) {
             ticks.push(effectiveBiddingStartTime + (i * interval));
         }
 
@@ -244,18 +253,62 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
             isMainPoint: false
         });
 
+        // Check if we have actual position history data
         if (originalData && originalData.length > 0) {
-            const filteredPoints = originalData
-                .filter(point => Math.abs(point.timestamp - biddingStart) > 10)
-                .map(point => ({
-                    ...point,
-                    isMainPoint: false,
-                    isCurrentPoint: false
-                }));
+            console.log("Using actual position history data:", originalData.length, "points");
 
-            result = [...result, ...filteredPoints];
+            // Process the original data points - ensure they're sorted by timestamp
+            const sortedPoints = [...originalData].sort((a, b) => a.timestamp - b.timestamp);
+
+            // Map the data points with proper formatting
+            const processedPoints = sortedPoints.map(point => ({
+                timestamp: point.timestamp,
+                longPercentage: point.longPercentage,
+                shortPercentage: point.shortPercentage,
+                isMainPoint: true,
+                isCurrentPoint: false
+            }));
+
+            // Add all history points to the result
+            result = [...result, ...processedPoints];
+        } else {
+            // Create intermediate points for a more realistic chart when using fallback data
+            console.log("No position history data, creating synthetic time points");
+
+            // Calculate current percentages based on total positions
+            let longPercentage = 50;
+            let shortPercentage = 50;
+
+            if (currentPositions && (currentPositions.long > 0 || currentPositions.short > 0)) {
+                const total = currentPositions.long + currentPositions.short;
+                longPercentage = total > 0 ? Math.round((currentPositions.long / total) * 100) : 50;
+                shortPercentage = total > 0 ? Math.round((currentPositions.short / total) * 100) : 50;
+            }
+
+            // Calculate several intermediate points (creating a transition effect)
+            const numPoints = 5; // Create 5 intermediate points
+            const startTime = biddingStart;
+            const endTime = current;
+            const timeInterval = (endTime - startTime) / (numPoints + 1);
+
+            // Create gradually changing percentages from 50/50 to current ratio
+            for (let i = 1; i <= numPoints; i++) {
+                const pointTime = startTime + timeInterval * i;
+                // Linear interpolation between 50% and the current percentage
+                const progressRatio = i / (numPoints + 1);
+                const interpolatedLongPercentage = Math.round(50 + (longPercentage - 50) * progressRatio);
+                const interpolatedShortPercentage = Math.round(50 + (shortPercentage - 50) * progressRatio);
+
+                result.push({
+                    timestamp: pointTime,
+                    longPercentage: interpolatedLongPercentage,
+                    shortPercentage: interpolatedShortPercentage,
+                    isMainPoint: true
+                });
+            }
         }
 
+        // Add current point with current percentages if not already represented in the history
         let currentLongPercentage = 50;
         let currentShortPercentage = 50;
 
@@ -265,7 +318,11 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
             currentShortPercentage = total > 0 ? Math.round((currentPositions.short / total) * 100) : 50;
         }
 
-        if (current > biddingStart && current <= maturityEnd) {
+        // Only add current point if the last timestamp in result is not near the current time
+        const lastPoint = result[result.length - 1];
+        const shouldAddCurrentPoint = !lastPoint || Math.abs(lastPoint.timestamp - current) > 60;
+
+        if (shouldAddCurrentPoint && current > biddingStart && current <= maturityEnd) {
             result.push({
                 timestamp: current,
                 longPercentage: currentLongPercentage,
@@ -274,7 +331,9 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
                 isCurrentPoint: true
             });
         }
-        if (current >= maturityEnd) {
+
+        // Add projection point if needed
+        if (current < maturityEnd) {
             result.push({
                 timestamp: maturityEnd,
                 longPercentage: currentLongPercentage,
@@ -284,8 +343,10 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
             });
         }
 
+        // Sort the points by timestamp
         result.sort((a, b) => a.timestamp - b.timestamp);
 
+        console.log("Generated", result.length, "enhanced position data points");
         return result;
     }, []);
 
@@ -516,6 +577,31 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
             borderColor="gray.700"
             position="relative"
         >
+            {/* Debug overlay for position data */}
+            {chartType === 'position' && (
+                <Box
+                    position="absolute"
+                    top="5px"
+                    right="5px"
+                    zIndex={10}
+                    bg="rgba(0,0,0,0.7)"
+                    p={2}
+                    borderRadius="md"
+                    border="1px solid"
+                    borderColor="gray.600"
+                    fontSize="xs"
+                    color="white"
+                    maxWidth="300px"
+                    maxHeight="100px"
+                    overflow="auto"
+                    display="block" // Make visible for debugging
+                >
+                    <Text fontWeight="bold" mb={1}>Position History Data:</Text>
+                    <Text>{positionHistory.length} original points, {enhancedPositionData.length} enhanced points</Text>
+                    <Text>Current Long: {positions.long}, Short: {positions.short}</Text>
+                </Box>
+            )}
+
             {chartType === 'price' ? renderPriceChart() : renderPositionChart()}
         </Box>
     );

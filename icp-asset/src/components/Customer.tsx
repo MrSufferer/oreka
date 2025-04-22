@@ -870,21 +870,35 @@ function Customer({ contractAddress }: CustomerProps) {
 
         const fetchPositionHistory = async () => {
             try {
+                console.log("Fetching position history for market:", marketId);
+
                 // Get position history from canister
                 const historyPoints = await marketService.getPositionHistory();
                 console.log("Fetched position history from canister:", historyPoints);
 
                 if (historyPoints && historyPoints.length > 0) {
+                    console.log("Using real position history with", historyPoints.length, "points");
                     setPositionHistory(historyPoints);
                 } else {
                     // Fallback to default if no history points available
+                    console.log("No position history found, using fallback");
                     const defaultPoints = createPositionHistoryPoints();
+                    console.log("Created fallback points:", defaultPoints);
                     setPositionHistory(defaultPoints);
                 }
             } catch (error) {
                 console.error("Error fetching position history:", error);
+                // Log more details about the error
+                if (error instanceof Error) {
+                    console.error("Error name:", error.name);
+                    console.error("Error message:", error.message);
+                    console.error("Error stack:", error.stack);
+                }
+
                 // Fallback to default if error
+                console.log("Using fallback due to error");
                 const defaultPoints = createPositionHistoryPoints();
+                console.log("Created fallback points:", defaultPoints);
                 setPositionHistory(defaultPoints);
             }
         };
@@ -969,6 +983,54 @@ function Customer({ contractAddress }: CustomerProps) {
         const interval = setInterval(updateMarketPositions, 10000);
         return () => clearInterval(interval);
     }, [marketService, marketId]);
+
+    // Add effect to update user's personal positions
+    useEffect(() => {
+        if (!marketService || !marketId || !authenticated) return;
+
+        const fetchUserPositions = async () => {
+            try {
+                console.log("Fetching user positions for market:", marketId);
+
+                // Get the current user's principal
+                const authClient = await AuthClient.create();
+                const identity = authClient.getIdentity();
+                const principal = identity.getPrincipal();
+
+                // Fetch the user's position
+                const userPosition = await marketService.getUserPosition(principal);
+                console.log("Raw user position:", userPosition);
+
+                if (userPosition) {
+                    // Convert bigint positions to numbers with correct ICP formatting (divide by 1e8)
+                    const longPosition = typeof userPosition.long === 'bigint'
+                        ? Number(userPosition.long) / 1e8
+                        : 0;
+                    const shortPosition = typeof userPosition.short === 'bigint'
+                        ? Number(userPosition.short) / 1e8
+                        : 0;
+
+                    setPositions({
+                        long: longPosition,
+                        short: shortPosition
+                    });
+
+                    console.log("User positions updated:", { long: longPosition, short: shortPosition });
+                } else {
+                    // Reset positions if none found
+                    setPositions({ long: 0, short: 0 });
+                    console.log("No user positions found");
+                }
+            } catch (error) {
+                console.error("Error fetching user positions:", error);
+            }
+        };
+
+        fetchUserPositions();
+        const interval = setInterval(fetchUserPositions, 10000); // Refresh every 10 seconds
+
+        return () => clearInterval(interval);
+    }, [marketService, marketId, authenticated]);
 
     // Add a function to fetch user balance
     const fetchUserBalance = async () => {

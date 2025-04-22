@@ -27,6 +27,11 @@ export const idlFactory = ({ IDL }) => {
     'body': IDL.Vec(IDL.Nat8),
     'headers': IDL.Vec(HttpHeader),
   });
+  const PositionPoint = IDL.Record({
+    'timestamp': IDL.Int,
+    'longAmount': IDL.Nat,
+    'shortAmount': IDL.Nat,
+  });
   const BinaryOptionMarket = IDL.Service({
     'bid': IDL.Func([Side, IDL.Nat], [Result], []),
     'changeStrikePrice': IDL.Func([IDL.Float64], [], []),
@@ -63,6 +68,11 @@ export const idlFactory = ({ IDL }) => {
           'positions': Position,
         }),
       ],
+      ['query'],
+    ),
+    'getPositionHistory': IDL.Func(
+      [],
+      [IDL.Vec(PositionPoint)],
       ['query'],
     ),
     'getTotalDeposit': IDL.Func([], [IDL.Nat], []),
