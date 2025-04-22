@@ -394,7 +394,7 @@ function ListAddressOwner({ ownerAddress, page }: ListAddressOwnerProps) {
                 const details = await marketActor.getMarketDetails() as any;
 
                 if (details && details.oracleDetails && details.oracleDetails.strikePrice) {
-                    const strikePrice = Number(details.oracleDetails.strikePrice) / 10e7;
+                    const strikePrice = Number(details.oracleDetails.strikePrice);
                     console.log(`Market ${marketId} strike price: ${strikePrice}`);
                     return strikePrice.toString();
                 }
