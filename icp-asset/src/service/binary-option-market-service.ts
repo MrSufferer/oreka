@@ -36,6 +36,7 @@ export interface IBinaryOptionMarketService {
     startMaturity(): Promise<void>;
     getPhase(): Promise<Phase>;
     getTradingPair(): Promise<string>;
+    getPositionHistory(): Promise<PositionPoint[]>;
 }
 
 // Add enum for Phase 
@@ -44,6 +45,20 @@ export enum Phase {
     Trading = 1,
     Maturity = 2,
     Expiry = 3
+}
+
+// Position history point type
+export interface PositionPoint {
+    timestamp: number;
+    longPercentage: number;
+    shortPercentage: number;
+    isMainPoint?: boolean;
+}
+
+// Position type
+export interface Position {
+    long: number;
+    short: number;
 }
 
 // Base abstract class for market services
@@ -599,6 +614,53 @@ export class BinaryOptionMarketService extends BaseMarketService implements IBin
         } catch (error) {
             console.error("Error fetching trading pair:", error);
             return "ETH-USD"; // Default fallback
+        }
+    }
+
+    // Calculate percentages from position amounts
+    private calculatePercentage(longAmount: bigint, shortAmount: bigint, isLong: boolean): number {
+        const longValue = Number(longAmount);
+        const shortValue = Number(shortAmount);
+        const total = longValue + shortValue;
+
+        if (total === 0) return 50;
+
+        return isLong
+            ? Math.round((longValue / total) * 100)
+            : Math.round((shortValue / total) * 100);
+    }
+
+    /**
+     * Get position history from canister
+     * @returns Array of position points with timestamps and percentages
+     */
+    public async getPositionHistory(): Promise<PositionPoint[]> {
+        this.assertInitialized();
+
+        try {
+            const history = await this.actor.getPositionHistory();
+
+            if (!history || !Array.isArray(history) || history.length === 0) {
+                console.log("No position history returned from canister");
+                return [];
+            }
+
+            // Convert canister format to frontend format with percentages
+            return history.map(point => {
+                const timestamp = Number(point.timestamp) / 1000000000; // Convert nano to seconds
+                const longAmount = BigInt(point.longAmount);
+                const shortAmount = BigInt(point.shortAmount);
+
+                return {
+                    timestamp,
+                    longPercentage: this.calculatePercentage(longAmount, shortAmount, true),
+                    shortPercentage: this.calculatePercentage(longAmount, shortAmount, false),
+                    isMainPoint: true
+                };
+            });
+        } catch (error) {
+            console.error("Error fetching position history:", error);
+            return [];
         }
     }
 }

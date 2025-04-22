@@ -92,6 +92,13 @@ shared(msg) actor class BinaryOptionMarket(
         #TxDuplicate : { duplicate_of: BlockIndex };
     };
 
+    /// @notice Position history data point
+    public type PositionHistoryPoint = {
+        timestamp : Int;    // Time of position change in nanoseconds
+        longAmount : Nat;   // Total long position at this time
+        shortAmount : Nat;  // Total short position at this time
+    };
+
     // ============ Core Types ============
 
     public type BlockIndex = Nat;
@@ -177,6 +184,9 @@ shared(msg) actor class BinaryOptionMarket(
     private var totalDeposited : Nat = 0;
     private var resolved : Bool = false;
     private var currentPhase : Phase = #Trading;
+    
+    // Position history tracking
+    private var positionHistory : [PositionHistoryPoint] = [];
 
     // ============ Data Structures ============
 
@@ -191,6 +201,7 @@ shared(msg) actor class BinaryOptionMarket(
     stable var licensesStable : [(Principal, Bool)] = [];
     stable var stableBalancesA : ?[(Principal, Nat)] = null;
     stable var stableBalancesB : ?[(Principal, Nat)] = null;
+    stable var stablePositionHistory : [PositionHistoryPoint] = [];
 
     var licenses : HashMap.HashMap<Principal, Bool> = HashMap.HashMap(16, Principal.equal, Principal.hash);
 
@@ -402,6 +413,14 @@ shared(msg) actor class BinaryOptionMarket(
         totalDeposited += value;
         logBid(side, msg.caller, value);
         
+        // Record position history
+        let newHistoryPoint : PositionHistoryPoint = {
+            timestamp = Time.now();
+            longAmount = positions.long;
+            shortAmount = positions.short;
+        };
+        positionHistory := Array.append(positionHistory, [newHistoryPoint]);
+        
         return #ok("Bid placed successfully");
     };
 
@@ -609,6 +628,11 @@ shared(msg) actor class BinaryOptionMarket(
         }
     };
 
+    /// @notice Gets position history
+    public query func getPositionHistory() : async [PositionHistoryPoint] {
+        positionHistory
+    };
+
     /// @notice Gets a user's position
     public query func getUserPosition(caller : Principal) : async {long: Nat; short: Nat} {
         {
@@ -811,6 +835,7 @@ shared(msg) actor class BinaryOptionMarket(
     system func preupgrade() {
         stableBalancesA := ?Iter.toArray(balancesA.entries());
         stableBalancesB := ?Iter.toArray(balancesB.entries());
+        stablePositionHistory := positionHistory;
     };
 
     system func postupgrade() {
@@ -837,5 +862,7 @@ shared(msg) actor class BinaryOptionMarket(
                 stableBalancesB := null;
             };
         };
+        
+        positionHistory := stablePositionHistory;
     };
 };

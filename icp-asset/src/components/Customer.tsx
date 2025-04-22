@@ -864,7 +864,40 @@ function Customer({ contractAddress }: CustomerProps) {
         }
     }, [authenticated, marketService, identityPrincipal, fetchMarketDetails]);
 
-    // Add new function to create position history points
+    // Replace the existing createPositionHistoryPoints function with actual position history fetching
+    useEffect(() => {
+        if (!marketService || !marketId) return;
+
+        const fetchPositionHistory = async () => {
+            try {
+                // Get position history from canister
+                const historyPoints = await marketService.getPositionHistory();
+                console.log("Fetched position history from canister:", historyPoints);
+
+                if (historyPoints && historyPoints.length > 0) {
+                    setPositionHistory(historyPoints);
+                } else {
+                    // Fallback to default if no history points available
+                    const defaultPoints = createPositionHistoryPoints();
+                    setPositionHistory(defaultPoints);
+                }
+            } catch (error) {
+                console.error("Error fetching position history:", error);
+                // Fallback to default if error
+                const defaultPoints = createPositionHistoryPoints();
+                setPositionHistory(defaultPoints);
+            }
+        };
+
+        fetchPositionHistory();
+
+        // Set up interval to refresh the history
+        const interval = setInterval(fetchPositionHistory, 10000); // Every 10 seconds
+
+        return () => clearInterval(interval);
+    }, [marketService, marketId, biddingStartTime, endTimestamp, totalMarketPositions]);
+
+    // Keep the createPositionHistoryPoints as a fallback
     const createPositionHistoryPoints = useCallback(() => {
         if (!biddingStartTime || !endTimestamp) return [];
 
@@ -903,16 +936,6 @@ function Customer({ contractAddress }: CustomerProps) {
 
         return result;
     }, [biddingStartTime, endTimestamp, totalMarketPositions]);
-
-    // Create position history points when relevant data changes
-    useEffect(() => {
-        // Only create position points when we have both timestamps and position data
-        if (biddingStartTime > 0 && endTimestamp && (totalMarketPositions.long > 0 || totalMarketPositions.short > 0)) {
-            const historyPoints = createPositionHistoryPoints();
-            console.log("Created position history points:", historyPoints);
-            setPositionHistory(historyPoints);
-        }
-    }, [biddingStartTime, endTimestamp, totalMarketPositions, createPositionHistoryPoints]);
 
     // Add additional effect to update market positions
     useEffect(() => {

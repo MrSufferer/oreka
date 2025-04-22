@@ -134,7 +134,7 @@ actor Factory {
             Cycles.add(230_949_972_000);
 
             // GitHub URL for binary option market WASM
-            let wasmUrl = "https://raw.githubusercontent.com/mangekyou-labs/oreka/feat/add-factory-canister/canisters/binary_option_market/build/BinaryOptionMarket.wasm";
+            let wasmUrl = "https://raw.githubusercontent.com/mangekyou-labs/oreka/refactor/icp-market-views/canisters/binary_option_market/build/BinaryOptionMarket.wasm";
 
             let transform_context : TransformContext = {
                 function = transform;
