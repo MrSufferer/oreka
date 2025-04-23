@@ -79,33 +79,6 @@ const getPhaseName = (phase: number) => {
 };
 
 
-
-// update getMarketTitle to format strikePrice correctly
-const getMarketTitle = (contract) => {
-  try {
-    // Format trading pair
-    const pair = contract.tradingPair.replace('/', '-');
-
-    // Format maturity time
-    const timestamp = Number(contract.maturityTime);
-    if (isNaN(timestamp) || timestamp === 0) return `${pair} Market`;
-
-    const date = new Date(timestamp * 1000);
-    const maturityTimeFormatted = format(date, 'MMM d, yyyy h:mm a');
-
-    // convert strikePrice from integer to float
-    const strikePriceInteger = parseInt(contract.strikePrice);
-    const strikePriceFormatted = (strikePriceInteger / STRIKE_PRICE_MULTIPLIER).toFixed(2);
-
-    return `${pair} will reach $${strikePriceFormatted} by ${maturityTimeFormatted} ?`;
-  } catch (error) {
-    console.error("Error getting market title:", error);
-    return "Unknown Market";
-  }
-};
-
-
-
 /**
  * Cleans up market titles by removing timestamp references in parentheses
  * @param {string} title - The original market title
@@ -180,8 +153,6 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         case 'Most recent':
           return (
             contractTimestamp >= oneWeekAgo
-            //  && Number(contract.phase) !== Phase.Maturity &&
-            // Number(contract.phase) !== Phase.Expiry
           );
 
         case 'Quests':
@@ -233,7 +204,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   useEffect(() => {
     if (currentTab === 'Most recent') {
       // Create a copy of the array to avoid modifying the original state directly
-      const sortedContracts = [...currentContracts].sort((a, b) => {
+      const sortedContracts = [...deployedContracts].sort((a, b) => {
         // Sort by creation date in descending order (newest first)
         return new Date(b.createDate).getTime() - new Date(a.createDate).getTime();
       });
@@ -244,7 +215,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   const fetchMarketResults = async () => {
     const provider = new ethers.providers.Web3Provider(window.ethereum);
     const results: { [key: string]: string } = {};
-  
+
     for (const contract of filteredContracts) {
       try {
         const instance = new ethers.Contract(contract.address, BinaryOptionMarket.abi, provider);
@@ -256,7 +227,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         console.error(`Error fetching market result for ${contract.address}`, err);
       }
     }
-  
+
     setMarketResults(results);
   };
 
@@ -631,9 +602,9 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
       // Parse numeric value for direct use in chart
       const strikePriceNumber = parseInt(contractData.strikePrice) / 100000000;
-      
 
-      
+
+
 
       // Calculate bidding start time (for position chart)
       // Use 24 hours before maturity as default if not available
@@ -758,7 +729,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         simplePriceData: simplePriceData,
 
         // Market result
-        marketResult: marketResult,
+        marketResult: marketResults,
 
         // Contract state flags (will be updated)
         canResolve: phaseNumber === Phase.Bidding && (Date.now() / 1000) >= maturityTime,
@@ -845,7 +816,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     const updateCountdowns = () => {
       const newCountdowns: { [key: string]: string } = {};
 
-      currentContracts.forEach(contract => {
+      deployedContracts.forEach(contract => {
         const timestamp = Number(contract.maturityTime);
         if (!isNaN(timestamp) && timestamp > 0) {
           if (isTimestampPassed(timestamp)) {
@@ -868,7 +839,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     const intervalId = setInterval(updateCountdowns, 1000);
 
     return () => clearInterval(intervalId);
-  }, [currentContracts]);
+  }, [deployedContracts]);
 
   /**
   * Assigns fixed background image indices to contracts when the contract list changes
@@ -878,7 +849,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     console.log("Setting contract image indices...");
     const newImageIndices: { [key: string]: number } = {};
 
-    currentContracts.forEach(contract => {
+    deployedContracts.forEach(contract => {
       if (!contract) return;
 
       // Read indexBg from contract and convert to number
@@ -891,7 +862,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     });
 
     setContractImageIndices(newImageIndices);
-  }, [currentContracts]);
+  }, [deployedContracts]);
 
   /**
  * Renders time remaining for a contract using the countdown state
@@ -905,12 +876,6 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
     return countdown;
   };
-
-  /**
-   * State for storing current prices of asset pairs
-   * Maps asset pairs to their current prices
-   */
-
 
   /**
    * Replaces the old useEffect for polling prices with WebSocket implementation
@@ -967,7 +932,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   useEffect(() => {
     const newPercentages: { [key: string]: { long: number, short: number } } = {};
 
-    currentContracts.forEach(contract => {
+    deployedContracts.forEach(contract => {
       const longAmount = parseFloat(contract.longAmount || '0');
       const shortAmount = parseFloat(contract.shortAmount || '0');
       const total = longAmount + shortAmount;
@@ -990,7 +955,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
     });
 
     setContractPercentages(newPercentages);
-  }, [currentContracts]);
+  }, [deployedContracts]);
 
   /**
  * Format strike price properly based on token type and size
@@ -1516,7 +1481,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             spacing={4}
             width="100%"
           >
-            {filteredContracts.map(({ address, createDate, longAmount, shortAmount, strikePrice,finalPrice, phase, maturityTime, tradingPair, owner }, index) => (
+            {filteredContracts.map(({ address, createDate, longAmount, shortAmount, strikePrice, finalPrice, phase, maturityTime, tradingPair, owner }, index) => (
 
               <Box
                 key={index}
@@ -1588,14 +1553,31 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                   </Box>
 
                   {/* Info section in the middle - Giảm padding và margin */}
-                  <Box p={3}>
+                  <Box p={3} display="flex" flexDirection="column" justifyContent="flex-start" height="100%">
                     {/* Phase indicator - Giảm margin bottom */}
 
 
                     {/* Market title */}
-                    <Box fontSize="xl" fontWeight="semibold" color="white" mb={2}>
+                    <Box
+                      fontSize="xl"
+                      fontWeight="semibold"
+                      color="white"
+                      mb={2}
+                      lineHeight="1.3"
+                      maxHeight="3.4em"
+                      overflow="hidden"
+                      textOverflow="ellipsis"
+                      display="-webkit-box"
+                      style={{
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        height: '3em', 
+                      }}
+                    >
                       {marketTitles[address] || "Loading..."}
                     </Box>
+
+                    
 
 
                     <HStack direction="column" w="100%" mb={4} width="100%">
@@ -1627,7 +1609,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                             py={2}
                             alignItems="center"
                             borderRadius="md"
-                            bg="#3D3D3D" 
+                            bg="#3D3D3D"
                             border="1px solid"
                             borderColor="gray.600"
                             textAlign="center"

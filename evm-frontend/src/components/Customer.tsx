@@ -2526,7 +2526,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                     </Text>
                   </VStack>
                   <Spacer />
-                  {currentPhase === Phase.Trading && isOwner && (Math.floor(Date.now() / 1000) < maturityTime) (
+                  {currentPhase === Phase.Trading && isOwner && ((Math.floor(Date.now()) / 1000) < maturityTime) && (
                     <Button
                       onClick={startBidding}
                       size="sm"
@@ -2594,7 +2594,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
                   <Spacer />
 
                   {/* Expire Button - Show when ở phase Maturity and resolved */}
-                  {currentPhase === Phase.Maturity && finalPrice && isOwner && (Math.floor(Date.now() / 1000) > maturityTime + 30) && (
+                  {currentPhase === Phase.Maturity && finalPrice && isOwner && ((Math.floor(Date.now() / 1000)) > maturityTime + 30) && (
                     <Button
                       onClick={handleExpireMarket}
                       size="sm"

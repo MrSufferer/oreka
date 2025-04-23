@@ -589,14 +589,12 @@ const MarketCharts: React.FC<MarketChartsProps> = ({
 
   // Ensure strike price is properly formatted for display
   // Convert from string or large integer to decimal value if needed
-  const displayStrikePrice = useMemo(() => {
-    if (!strikePrice) return 0;
-    return typeof strikePrice === 'string' ? parseFloat(strikePrice) : strikePrice;
-  }, [strikePrice]);
-  
-  if (!biddingStartTime || !maturityTime) {
-    return <Skeleton height="500px" />;
-  }
+  const displayStrikePrice = typeof strikePrice === 'string'
+  ? parseFloat(strikePrice)
+  : typeof strikePrice === 'number'
+    ? strikePrice
+    : parseFloat(strikePrice) / 10**8;
+
   // Render price chart if chartType is 'price'
   if (chartType === 'price') {
     // const lineColor = strikePrice > 0 && optimizedPriceData.length > 0 && optimizedPriceData[optimizedPriceData.length - 1]?.close > strikePrice ? "#FF6384" : "#00D7B5";
