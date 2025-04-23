@@ -1727,7 +1727,7 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
   const resetBettingForm = () => {
     setSelectedSide(null);
     setBidAmount("");
-    setPotentialProfit(0);
+    setPotentialProfit('0');
     setProfitPercentage(0);
   };
 

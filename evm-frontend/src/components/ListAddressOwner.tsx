@@ -456,7 +456,8 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             maturityTime: maturityTimeValue,
             tradingPair,
             owner,
-            indexBg: indexBgValue.toString()
+            indexBg: indexBgValue.toString(),
+            finalPrice: finalPriceBN.toString() || "0"
           };
         } catch (error) {
           console.error(`Error fetching data for contract ${address}:`, error);
@@ -470,7 +471,8 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
             maturityTime: 0,
             tradingPair: 'Unknown',
             owner: '',
-            indexBg: '1'
+            indexBg: '1',
+            finalPrice: '0'
           };
         }
       }));
@@ -699,7 +701,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         currentPrice: currentPrice,
         priceDifference: priceDifference,
         percentageDifference: percentageDifference,
-        finalPrice: finalPrice, // Will be updated from blockchain if needed
+
 
         // Trading pair information
         tradingPair: contractData.tradingPair,
@@ -1536,7 +1538,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                     />
                     <Box
                       display="inline-block"
-                      bg={getPhaseColor(parseInt(phase))}
+                      bg={getPhaseColor(Number(phase))} 
                       color="white"
                       px={3}
                       py={1}
@@ -1548,7 +1550,7 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
                       bottom="3px"
                       left="7px"
                     >
-                      {getPhaseName(parseInt(phase))}
+                      {getPhaseName(Number(phase))}
                     </Box>
                   </Box>
 
