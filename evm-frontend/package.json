@@ -45,7 +45,7 @@
     "@types/react-dom": "18.0.3",
     "eslint": "8.15.0",
     "eslint-config-next": "12.1.6",
-    "typescript": "4.6.4"
+    "typescript": "^5.8.3"
   },
   "packageManager": "yarn@1.22.21+sha1.1959a18351b811cdeedbd484a8f86c3cc3bbaf72"
 }

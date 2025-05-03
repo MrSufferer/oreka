@@ -28,7 +28,7 @@
 
 //         // Sepolia SNX/USD feed address: 0xc0F82A46033b8BdBA4Bb0B0e28Bc2006F64355bC
 
-//         // demo example: define strikePrice for WIF/USD pair at 1.66USD and owner will call the resolveMarket() around August 13th 2024.
+//         // demo example: define strikePrice for SNX/USD pair at 1.66USD and owner will call the resolveMarket() around August 13th 2024.
 //         BinaryOptionMarket binaryOptionMarket = new BinaryOptionMarket(
 //             ownerPublicKey,
 //             0xc0F82A46033b8BdBA4Bb0B0e28Bc2006F64355bC,
