@@ -1,0 +1,121 @@
+{
+    "abi": [
+        {
+            "type": "function",
+            "name": "BTC_USD_FEED_ID",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "bytes21",
+                    "internalType": "bytes21"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "ETH_USD_FEED_ID",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "bytes21",
+                    "internalType": "bytes21"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "getPriceForFeed",
+            "inputs": [
+                {
+                    "name": "feedId",
+                    "type": "bytes21",
+                    "internalType": "bytes21"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "price",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "decimals",
+                    "type": "int8",
+                    "internalType": "int8"
+                },
+                {
+                    "name": "timestamp",
+                    "type": "uint64",
+                    "internalType": "uint64"
+                }
+            ],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "function",
+            "name": "getPriceInWeiForFeed",
+            "inputs": [
+                {
+                    "name": "feedId",
+                    "type": "bytes21",
+                    "internalType": "bytes21"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "price",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "timestamp",
+                    "type": "uint64",
+                    "internalType": "uint64"
+                }
+            ],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "function",
+            "name": "getFeedIdForSymbol",
+            "inputs": [
+                {
+                    "name": "symbol",
+                    "type": "string",
+                    "internalType": "string"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "bytes21",
+                    "internalType": "bytes21"
+                }
+            ],
+            "stateMutability": "pure"
+        },
+        {
+            "type": "function",
+            "name": "getFeedName",
+            "inputs": [
+                {
+                    "name": "feedId",
+                    "type": "bytes21",
+                    "internalType": "bytes21"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "string",
+                    "internalType": "string"
+                }
+            ],
+            "stateMutability": "pure"
+        }
+    ]
+}

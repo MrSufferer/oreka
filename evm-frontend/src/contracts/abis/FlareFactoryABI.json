@@ -1,0 +1,142 @@
+{
+    "abi": [
+        {
+            "type": "function",
+            "name": "createMarket",
+            "inputs": [
+                {
+                    "name": "tradingPair",
+                    "type": "string",
+                    "internalType": "string"
+                },
+                {
+                    "name": "priceFeedId",
+                    "type": "bytes21",
+                    "internalType": "bytes21"
+                },
+                {
+                    "name": "strikePrice",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "maturityTime",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "feePercentage",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "indexBg",
+                    "type": "uint8",
+                    "internalType": "uint8"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                }
+            ],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "function",
+            "name": "deployedMarkets",
+            "inputs": [
+                {
+                    "name": "",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "getDeployedMarketsCount",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "getDeployedMarkets",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "address[]",
+                    "internalType": "address[]"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "event",
+            "name": "MarketCreated",
+            "inputs": [
+                {
+                    "name": "marketAddress",
+                    "type": "address",
+                    "indexed": true,
+                    "internalType": "address"
+                },
+                {
+                    "name": "tradingPair",
+                    "type": "string",
+                    "indexed": false,
+                    "internalType": "string"
+                },
+                {
+                    "name": "priceFeedId",
+                    "type": "bytes21",
+                    "indexed": false,
+                    "internalType": "bytes21"
+                },
+                {
+                    "name": "strikePrice",
+                    "type": "uint256",
+                    "indexed": false,
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "maturityTime",
+                    "type": "uint256",
+                    "indexed": false,
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "feePercentage",
+                    "type": "uint256",
+                    "indexed": false,
+                    "internalType": "uint256"
+                },
+                {
+                    "name": "indexBg",
+                    "type": "uint8",
+                    "indexed": false,
+                    "internalType": "uint8"
+                }
+            ],
+            "anonymous": false
+        }
+    ]
+}

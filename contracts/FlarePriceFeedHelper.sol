@@ -19,7 +19,7 @@ contract FlarePriceFeedHelper {
     bytes21 public constant ALGO_USD_FEED_ID = 0x01414c474f2f555344000000000000000000000000; // "ALGO/USD"
     bytes21 public constant BCH_USD_FEED_ID = 0x014243482f55534400000000000000000000000000; // "BCH/USD"
     bytes21 public constant LTC_USD_FEED_ID = 0x014c54432f55534400000000000000000000000000; // "LTC/USD"
-    bytes21 public constant MATIC_USD_FEED_ID = 0x014d415449432f555344000000000000000000000000; // "MATIC/USD"
+    bytes21 public constant MATIC_USD_FEED_ID = 0x014d415449432f5553440000000000000000000000; // "MATIC/USD"
     
     // Instance of FTSO interface
     FtsoV2Interface private ftsoV2;
@@ -35,7 +35,7 @@ contract FlarePriceFeedHelper {
      * @return decimals The decimals for the price
      * @return timestamp The timestamp when the price was last updated
      */
-    function getPriceForFeed(bytes21 feedId) public view returns (uint256 price, int8 decimals, uint64 timestamp) {
+    function getPriceForFeed(bytes21 feedId) public returns (uint256 price, int8 decimals, uint64 timestamp) {
         return ftsoV2.getFeedById(feedId);
     }
     
@@ -45,7 +45,7 @@ contract FlarePriceFeedHelper {
      * @return price The current price in Wei
      * @return timestamp The timestamp when the price was last updated
      */
-    function getPriceInWeiForFeed(bytes21 feedId) public view returns (uint256 price, uint64 timestamp) {
+    function getPriceInWeiForFeed(bytes21 feedId) public returns (uint256 price, uint64 timestamp) {
         return ftsoV2.getFeedByIdInWei(feedId);
     }
     
@@ -56,7 +56,7 @@ contract FlarePriceFeedHelper {
      * @return decimals Array of decimals for each price
      * @return timestamp The timestamp when the prices were last updated
      */
-    function getBatchPrices(bytes21[] memory feedIds) public view returns (uint256[] memory prices, int8[] memory decimals, uint64 timestamp) {
+    function getBatchPrices(bytes21[] memory feedIds) public returns (uint256[] memory prices, int8[] memory decimals, uint64 timestamp) {
         return ftsoV2.getFeedsById(feedIds);
     }
     
@@ -70,10 +70,21 @@ contract FlarePriceFeedHelper {
         // Format: 0x01 + (symbol in uppercase, right-padded with zeros)
         
         bytes memory symbolBytes = bytes(symbol);
-        bytes21 result = 0x01;
         
+        // Start with empty bytes
+        bytes memory fullFeedId = new bytes(21);
+        // Set the first byte to 0x01 (crypto category)
+        fullFeedId[0] = 0x01;
+        
+        // Copy symbol bytes to the resulting bytes
         for (uint i = 0; i < symbolBytes.length && i < 19; i++) {
-            result |= bytes21(bytes1(symbolBytes[i])) >> (i * 8);
+            fullFeedId[i+1] = symbolBytes[i];
+        }
+        
+        // Convert to bytes21
+        bytes21 result;
+        assembly {
+            result := mload(add(fullFeedId, 32))
         }
         
         return result;

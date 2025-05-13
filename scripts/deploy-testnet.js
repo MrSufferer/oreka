@@ -1,5 +1,6 @@
 // This script deploys the BinaryOptionMarketFlareFactory and FlarePriceFeedHelper contracts to Flare's Coston2 testnet
 const hre = require("hardhat");
+const { ethers } = require("hardhat");
 
 async function main() {
     console.log("Deploying contracts to Coston2 testnet...");
@@ -59,9 +60,13 @@ async function main() {
         // Set maturity time to 24 hours from now
         const maturityTime = Math.floor(Date.now() / 1000) + 86400;
 
+        // Using a hardcoded price for testing purposes
+        // In a production environment, you would need to implement proper price fetching
+        console.log("Using hardcoded BTC price for testing");
+        const btcPrice = hre.ethers.parseUnits("50000", 5); // $50,000 with 5 decimals
+
         // Strike price at current BTC price + 5%
-        const [btcPrice, decimals] = await priceFeedHelper.getPriceForFeed(BTC_USD_FEED_ID);
-        const strikePrice = btcPrice.mul(105).div(100); // 5% above current price
+        const strikePrice = btcPrice * BigInt(105) / BigInt(100); // 5% above current price
 
         // Create the market
         const tx = await factory.createMarket(

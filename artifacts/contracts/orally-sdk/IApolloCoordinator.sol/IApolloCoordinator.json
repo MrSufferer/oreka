@@ -1,0 +1,59 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "IApolloCoordinator",
+  "sourceName": "contracts/orally-sdk/IApolloCoordinator.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "_dataFeedId",
+          "type": "string"
+        },
+        {
+          "internalType": "uint64",
+          "name": "_callbackGasLimit",
+          "type": "uint64"
+        }
+      ],
+      "name": "requestDataFeed",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint64",
+          "name": "_callbackGasLimit",
+          "type": "uint64"
+        },
+        {
+          "internalType": "uint64",
+          "name": "_numWords",
+          "type": "uint64"
+        }
+      ],
+      "name": "requestRandomFeed",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

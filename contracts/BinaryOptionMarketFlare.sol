@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "node_modules/@openzeppelin/contracts/access/Ownable.sol";
-import "./OracleConsumer.sol";
 
 import "@flarenetwork/flare-periphery-contracts/flare/ContractRegistry.sol";
 import "@flarenetwork/flare-periphery-contracts/flare/FtsoV2Interface.sol";
@@ -43,7 +42,6 @@ contract BinaryOptionMarketFlare is Ownable {
     }
 
     OracleDetails public oracleDetails;
-    OracleConsumer internal priceFeed;
     FtsoV2Interface internal ftsoV2;
 
     // Price feed details
@@ -86,7 +84,7 @@ contract BinaryOptionMarketFlare is Ownable {
         uint _maturityTime,
         uint _feePercentage,
         uint8 _indexBg
-    ) Ownable(_owner) {
+    ) {
         require(_maturityTime > block.timestamp, "Maturity time must be in the future");
         require(_feePercentage >= 1 && _feePercentage <= 200, "Fee must be between 0.1% and 20%");
         require(_indexBg >= 1 && _indexBg <= 10, "Index background must be between 1 and 10");
@@ -236,11 +234,11 @@ contract BinaryOptionMarketFlare is Ownable {
         return oracleDetails.finalPrice;
     }
 
-    function getCurrentPrice() public view returns (uint256, int8, uint64) {
+    function getCurrentPrice() public returns (uint256, int8, uint64) {
         return ftsoV2.getFeedById(priceFeedId);
     }
     
-    function getCurrentPriceInWei() public view returns (uint256, uint64) {
+    function getCurrentPriceInWei() public returns (uint256, uint64) {
         return ftsoV2.getFeedByIdInWei(priceFeedId);
     }
 } 

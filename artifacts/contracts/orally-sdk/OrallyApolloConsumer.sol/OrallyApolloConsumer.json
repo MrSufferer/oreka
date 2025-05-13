@@ -1,0 +1,22 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "OrallyApolloConsumer",
+  "sourceName": "contracts/orally-sdk/OrallyApolloConsumer.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_registry",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    }
+  ],
+  "bytecode": "0x6080604052348015600f57600080fd5b5060405160c838038060c8833981016040819052602a91604e565b600080546001600160a01b0319166001600160a01b0392909216919091179055607c565b600060208284031215605f57600080fd5b81516001600160a01b0381168114607557600080fd5b9392505050565b603f8060896000396000f3fe6080604052600080fdfea26469706673582212204645c93509aac2d1fa53c12fa553686f054060291f3201e3a80daebb4628dcea64736f6c63430008140033",
+  "deployedBytecode": "0x6080604052600080fdfea26469706673582212204645c93509aac2d1fa53c12fa553686f054060291f3201e3a80daebb4628dcea64736f6c63430008140033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}
