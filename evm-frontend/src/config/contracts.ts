@@ -3,8 +3,21 @@ import FlareFactoryABI from '../contracts/abis/FlareFactoryABI.json';
 import FactoryABI from '../contracts/abis/FactoryABI.json';
 import FlarePriceFeedHelperABI from '../contracts/abis/FlarePriceFeedHelperABI.json';
 
-export const FACTORY_ADDRESS = deployedAddress.FactoryAddress;
+// Factory addresses per chain
+export const FACTORY_ADDRESSES: { [chainId: string]: string } = {
+  '0x72': deployedAddress.FactoryAddress, // Coston2
+  '0xaa36a7': deployedAddress.FactoryAddress, // Sepolia
+  '0x40da': '0xC8F1403cD1e77eFFF6864bF271a9ED980729524C', // 0G Galileo Testnet
+  // Add other chains as needed
+};
+
+export const FACTORY_ADDRESS = deployedAddress.FactoryAddress; // Default factory address
 export const PRICE_FEED_HELPER_ADDRESS = deployedAddress.PriceFeedHelperAddress;
+
+// Function to get factory address for current chain
+export const getFactoryAddress = (chainId: string): string => {
+  return FACTORY_ADDRESSES[chainId] || FACTORY_ADDRESS;
+};
 
 // Sepolia Price Feed Addresses
 export const SEPOLIA_PRICE_FEEDS = {

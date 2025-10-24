@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { FACTORY_ADDRESS, PRICE_FEED_HELPER_ADDRESS, getFactoryABI, PRICE_FEED_HELPER_ABI } from '../config/contracts';
+import { getFactoryAddress, PRICE_FEED_HELPER_ADDRESS, getFactoryABI, PRICE_FEED_HELPER_ABI } from '../config/contracts';
 
 /**
  * Create a market on Flare using the appropriate contract based on network
@@ -17,9 +17,12 @@ export const createFlareMarket = async (
     const chainId = await signer.getChainId();
     const chainIdHex = '0x' + chainId.toString(16);
 
+    // Get the factory address for this chain
+    const factoryAddress = getFactoryAddress(chainIdHex);
+
     // Create the contract with the appropriate ABI
     const factoryContract = new ethers.Contract(
-        FACTORY_ADDRESS,
+        factoryAddress,
         getFactoryABI(chainIdHex),
         signer
     );

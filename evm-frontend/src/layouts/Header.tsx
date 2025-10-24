@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Flex, Text, HStack } from "@chakra-ui/react";
 import { MdOutlineAccountBalanceWallet } from "react-icons/md";
 import { ethers } from "ethers";
+import { NetworkSwitcher } from "../components/NetworkSwitcher";
 
 function Header({ walletAddress }: { walletAddress: string }) {
   const [balance, setBalance] = useState("0"); // Số dư của ví
@@ -36,6 +37,8 @@ function Header({ walletAddress }: { walletAddress: string }) {
       {/* Hiển thị số dư và địa chỉ ví nếu đã kết nối */}
       {walletAddress && (
         <HStack spacing="20px" mt="30px" align="center">
+          <NetworkSwitcher />
+          
           <Flex
             align="center"
             p={2}

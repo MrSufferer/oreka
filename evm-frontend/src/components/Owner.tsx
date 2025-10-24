@@ -4,7 +4,7 @@ import { Box, Button, Input, VStack, useToast, HStack, Icon, SimpleGrid, Text, S
 import { FaEthereum, FaWallet, FaArrowUp, FaArrowDown, FaClock } from 'react-icons/fa';
 import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketChainlinkABI.json';
 import Factory from '../contracts/abis/FactoryABI.json';
-import { FACTORY_ADDRESS } from '../config/contracts';
+import { FACTORY_ADDRESS, getFactoryAddress } from '../config/contracts';
 import { setContractTradingPair } from '../config/tradingPairs';
 import { useAuth } from '../context/AuthContext';
 import { UnorderedList, ListItem } from '@chakra-ui/react';
@@ -84,6 +84,17 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
   // State for deploy progress
   const [deployProgress, setDeployProgress] = useState(0);
 
+  // Helper function to get factory address for current chain
+  const getCurrentFactoryAddress = async (): Promise<string> => {
+    if (window.ethereum) {
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const network = await provider.getNetwork();
+      const chainIdHex = '0x' + network.chainId.toString(16);
+      return getFactoryAddress(chainIdHex);
+    }
+    return FACTORY_ADDRESS;
+  };
+
   // Handler for coin selection dropdown
   const handleCoinSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = availableCoins.find(coin => coin.value === event.target.value); // Find selected coin
@@ -147,12 +158,13 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       // Fake deploy address to estimate Factory.deploy
       const fakeAddress = ethers.Wallet.createRandom().address;
 
-      const factoryContract = new ethers.Contract(FACTORY_ADDRESS, Factory.abi, signer);
+      const currentFactoryAddress = await getCurrentFactoryAddress();
+      const factoryContract = new ethers.Contract(currentFactoryAddress, Factory.abi, signer);
       const factoryData = factoryContract.interface.encodeFunctionData('deploy', [fakeAddress]);
 
       const gasUnitsFactory = await provider.estimateGas({
         from: walletAddress,
-        to: FACTORY_ADDRESS,
+        to: currentFactoryAddress,
         data: factoryData,
       });
 
@@ -186,34 +198,39 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
 
   // Listen for contract deployment events from the Factory contract
   useEffect(() => {
-    const provider = new ethers.providers.Web3Provider(window.ethereum); // Create provider
-    const factoryContract = new ethers.Contract(FactoryAddress, Factory.abi, provider); // Create factory contract instance
+    const setupFactoryListener = async () => {
+      const provider = new ethers.providers.Web3Provider(window.ethereum); // Create provider
+      const currentFactoryAddress = await getCurrentFactoryAddress();
+      const factoryContract = new ethers.Contract(currentFactoryAddress, Factory.abi, provider); // Create factory contract instance
 
-    // Listen to Deployed event
-    factoryContract.on("Deployed", (owner, newContractAddress, index) => {
-      console.log("Event 'Deployed' received:"); // Log event
-      console.log("Owner:", owner); // Log owner address
-      console.log("New contract deployed:", newContractAddress); // Log new contract address
-      console.log("Index:", index); // Log index
+      // Listen to Deployed event
+      factoryContract.on("Deployed", (owner, newContractAddress, index) => {
+        console.log("Event 'Deployed' received:"); // Log event
+        console.log("Owner:", owner); // Log owner address
+        console.log("New contract deployed:", newContractAddress); // Log new contract address
+        console.log("Index:", index); // Log index
 
-      setContractAddress(newContractAddress); // Update contract address state
-      setDeployedContracts(prev => [...prev, newContractAddress]); // Update deployed contracts list
+        setContractAddress(newContractAddress); // Update contract address state
+        setDeployedContracts(prev => [...prev, newContractAddress]); // Update deployed contracts list
 
-      // Show success toast notification
-      toast({
-        title: "Contract deployed successfully!",
-        description: `New Contract Address: ${newContractAddress}`,
-        status: "success",
-        duration: 5000,
-        isClosable: true,
+        // Show success toast notification
+        toast({
+          title: "Contract deployed successfully!",
+          description: `New Contract Address: ${newContractAddress}`,
+          status: "success",
+          duration: 5000,
+          isClosable: true,
+        });
       });
-    });
 
-    return () => {
-      // Cleanup: remove listener when component unmounts
-      console.log("Removing event listener on Factory contract..."); // Log cleanup
-      factoryContract.removeAllListeners("Deployed"); // Remove event listener
+      return () => {
+        // Cleanup: remove listener when component unmounts
+        console.log("Removing event listener on Factory contract..."); // Log cleanup
+        factoryContract.removeAllListeners("Deployed"); // Remove event listener
+      };
     };
+    
+    setupFactoryListener();
   }, []);
 
   // Recalculate network fee when parameters change
@@ -505,7 +522,8 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       setContractAddress(contract.address); // Update contract address state
 
       // Register with Factory contract on current network
-      const factoryContract = new ethers.Contract(FACTORY_ADDRESS, Factory.abi, signer); // Create factory contract instance
+      const currentFactoryAddress = await getCurrentFactoryAddress();
+      const factoryContract = new ethers.Contract(currentFactoryAddress, Factory.abi, signer); // Create factory contract instance
       const registerTx = await factoryContract.deploy(contract.address, overrides); // Register contract with factory
 
       // Show toast while waiting for registration
@@ -555,7 +573,8 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
   const fetchDeployedContracts = async () => {
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const factory = new ethers.Contract(FACTORY_ADDRESS, Factory.abi, provider);
+      const currentFactoryAddress = await getCurrentFactoryAddress();
+      const factory = new ethers.Contract(currentFactoryAddress, Factory.abi, provider);
   
       const filter = factory.filters.Deployed();
       const events = await factory.queryFilter(filter);

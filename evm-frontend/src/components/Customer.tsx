@@ -36,7 +36,7 @@ import {
 } from '../utils/priceFeeds';
 
 import { determineMarketResult } from '../utils/market';
-import { FACTORY_ADDRESS } from '../config/contracts';
+import { FACTORY_ADDRESS, getFactoryAddress } from '../config/contracts';
 import Factory from '../contracts/abis/FactoryABI.json';
 import { truncate } from 'fs';
 /**
@@ -1777,7 +1777,10 @@ function Customer({ contractAddress: initialContractAddress }: CustomerProps) {
           onClick={async () => {
             try {
               const provider = new ethers.providers.Web3Provider(window.ethereum);
-              const factory = new ethers.Contract(FACTORY_ADDRESS, Factory.abi, provider);
+              const network = await provider.getNetwork();
+              const chainIdHex = '0x' + network.chainId.toString(16);
+              const currentFactoryAddress = getFactoryAddress(chainIdHex);
+              const factory = new ethers.Contract(currentFactoryAddress, Factory.abi, provider);
           
               const filter = factory.filters.Deployed();
               const events = await factory.queryFilter(filter);

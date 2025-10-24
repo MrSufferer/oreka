@@ -13,7 +13,7 @@ import { FaCoins } from "react-icons/fa";
 import Factory from '../contracts/abis/FactoryABI.json';
 import { useToast } from '@chakra-ui/react';
 import { useRouter } from 'next/router';
-import { FACTORY_ADDRESS } from '../config/contracts';
+import { FACTORY_ADDRESS, getFactoryAddress } from '../config/contracts';
 import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketABI.json';
 import { useAuth } from '../context/AuthContext';
 import { PriceService } from '../services/PriceService';
@@ -318,7 +318,8 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
       console.log("Current network:", network.name, network.chainId);
 
       // Use network-specific factory address if necessary
-      let factoryAddress = FACTORY_ADDRESS;
+      const chainIdHex = '0x' + network.chainId.toString(16);
+      let factoryAddress = getFactoryAddress(chainIdHex);
       console.log("Using factory address:", factoryAddress);
 
       const factoryContract = new ethers.Contract(factoryAddress, Factory.abi, provider);
@@ -512,31 +513,38 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
   useEffect(() => {
     fetchDeployedContracts();
 
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-    const contract = new ethers.Contract(FactoryAddress, Factory.abi, provider);
+    const setupListener = async () => {
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const network = await provider.getNetwork();
+      const chainIdHex = '0x' + network.chainId.toString(16);
+      const currentFactoryAddress = getFactoryAddress(chainIdHex);
+      const contract = new ethers.Contract(currentFactoryAddress, Factory.abi, provider);
 
-    /**
-     * Handler for new contract deployment events
-     * @param {string} owner - Address of the contract owner
-     * @param {string} contractAddress - Address of the newly deployed contract
-     * @param {number} index - Index of the contract in the owner's list
-     */
-    const handleNewContract = (owner: string, contractAddress: string, index: number) => {
-      console.log("New contract deployed event received:", contractAddress);
-      console.log("Owner:", owner);
-      console.log("Index:", index);
+      /**
+       * Handler for new contract deployment events
+       * @param {string} owner - Address of the contract owner
+       * @param {string} contractAddress - Address of the newly deployed contract
+       * @param {number} index - Index of the contract in the owner's list
+       */
+      const handleNewContract = (owner: string, contractAddress: string, index: number) => {
+        console.log("New contract deployed event received:", contractAddress);
+        console.log("Owner:", owner);
+        console.log("Index:", index);
 
-      // Always update contract list when a new contract is deployed
-      fetchDeployedContracts();
+        // Always update contract list when a new contract is deployed
+        fetchDeployedContracts();
+      };
+
+      // Listen for Deployed events
+      contract.on("Deployed", handleNewContract);
+
+      // Cleanup listener on unmount
+      return () => {
+        contract.removeListener("Deployed", handleNewContract);
+      };
     };
-
-    // Listen for Deployed events
-    contract.on("Deployed", handleNewContract);
-
-    // Cleanup listener on unmount
-    return () => {
-      contract.removeListener("Deployed", handleNewContract);
-    };
+    
+    setupListener();
   }, []);
 
   /**

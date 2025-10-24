@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.26;
 
 import "node_modules/@openzeppelin/contracts/access/Ownable.sol";
 
-import "@flarenetwork/flare-periphery-contracts/flare/ContractRegistry.sol";
-import "@flarenetwork/flare-periphery-contracts/flare/FtsoV2Interface.sol";
+import {AggregatorV3Interface} from "node_modules/@chainlink/contracts/src/v0.4/interfaces/AggregatorV3Interface.sol";
 
 /**
  * THIS IS AN EXAMPLE CONTRACT THAT USES HARDCODED
@@ -13,7 +12,16 @@ import "@flarenetwork/flare-periphery-contracts/flare/FtsoV2Interface.sol";
  * DO NOT USE THIS CODE IN PRODUCTION.
  */
 
-contract BinaryOptionMarketFlare is Ownable {
+/**
+ * If you are reading data feeds on L2 networks, you must
+ * check the latest answer from the L2 Sequencer Uptime
+ * Feed to ensure that the data is accurate in the event
+ * of an L2 sequencer outage. See the
+ * https://docs.chain.link/data-feeds/l2-sequencer-feeds
+ * page for details.
+ */
+
+contract BinaryOptionMarket is Ownable {
     enum Side {
         Long,
         Short
@@ -26,8 +34,8 @@ contract BinaryOptionMarketFlare is Ownable {
     }
 
     struct OracleDetails {
-        uint256 strikePrice;
-        uint256 finalPrice;
+        int strikePrice;
+        int finalPrice;
     }
 
     struct Position {
@@ -42,30 +50,32 @@ contract BinaryOptionMarketFlare is Ownable {
     }
 
     OracleDetails public oracleDetails;
-    FtsoV2Interface internal ftsoV2;
+    //OracleConsumer internal priceFeed;
+    AggregatorV3Interface internal dataFeed;
+    uint8 public priceDecimals;
 
-    // Price feed details
-    bytes21 private priceFeedId;
-    string public tradingPair;
+
+    uint256 public strikePrice;
+    uint256 public deployTime;
+    uint public biddingStartTime;
+    uint256 public maturityTime;
+    uint256 public resolveTime;
 
     Position public positions;
     MarketFees public fees;
     uint public totalDeposited;
     bool public resolved;
     Phase public currentPhase;
-    uint public feePercentage = 10; // 10% fee on rewards
+    uint public feePercentage;
+    string public tradingPair;
+    uint public indexBg;
+
     mapping(address => uint) public longBids;
     mapping(address => uint) public shortBids;
     mapping(address => bool) public hasClaimed;
-    
-    uint256 public deployTime;
-    uint public maturityTime; // Time when market resolves
-    uint public resolveTime;
-    uint public biddingStartTime;
-    uint8 public indexBg; // Background index (1-10)
 
     event Bid(Side side, address indexed account, uint value);
-    event MarketResolved(uint256 finalPrice, uint timeStamp);
+    event MarketResolved(int finalPrice, uint timeStamp);
     event RewardClaimed(address indexed account, uint value);
     event Withdrawal(address indexed user, uint amount);
     event PositionUpdated(
@@ -74,39 +84,40 @@ contract BinaryOptionMarketFlare is Ownable {
         uint shortAmount,
         uint totalDeposited
     );
-    event MarketOutcome(Side winningSide, address indexed user, bool isWinner);
 
+    
     constructor(
+        int _strikePrice,
         address _owner,
         string memory _tradingPair,
-        bytes21 _priceFeedId,
-        uint256 _strikePrice,
+        address _priceFeedAddress,
         uint _maturityTime,
         uint _feePercentage,
-        uint8 _indexBg
-    ) {
+        uint _indexBg
+    ) Ownable(_owner) {
+
         require(_maturityTime > block.timestamp, "Maturity time must be in the future");
         require(_feePercentage >= 1 && _feePercentage <= 200, "Fee must be between 0.1% and 20%");
         require(_indexBg >= 1 && _indexBg <= 10, "Index background must be between 1 and 10");
-        
-        // Access the FTSO through the Contract Registry
-        ftsoV2 = ContractRegistry.getFtsoV2();
-        
+
+        oracleDetails = OracleDetails(_strikePrice, _strikePrice);
         tradingPair = _tradingPair;
-        priceFeedId = _priceFeedId;
-        oracleDetails = OracleDetails(_strikePrice, 0);
         maturityTime = _maturityTime;
         deployTime = block.timestamp;
         feePercentage = _feePercentage;
         indexBg = _indexBg;
+
+        dataFeed = AggregatorV3Interface(_priceFeedAddress);
+        priceDecimals = dataFeed.decimals();
+
         currentPhase = Phase.Trading;
-        transferOwnership(_owner);
+        transferOwnership(msg.sender); // Initialize the Ownable contract with the contract creator
     }
 
     function bid(Side side) public payable {
         require(currentPhase == Phase.Bidding, "Not in bidding phase");
         require(msg.value > 0, "Value must be greater than zero");
-
+        
         if (side == Side.Long) {
             positions.long += msg.value;
             longBids[msg.sender] += msg.value;
@@ -116,45 +127,56 @@ contract BinaryOptionMarketFlare is Ownable {
         }
 
         totalDeposited += msg.value;
-        
+
         emit PositionUpdated(
             block.timestamp,
             positions.long,
             positions.short,
             totalDeposited
         );
-        
+
         emit Bid(side, msg.sender, msg.value);
     }
 
-    function resolveMarket() external onlyOwner {
-        require(currentPhase == Phase.Trading, "Market not in trading phase");
+    event MarketOutcome(Side winningSide, address indexed user, bool isWinner);
+
+    function resolveMarket() external {
+        require(currentPhase == Phase.Bidding, "Market not in bidding phase");
         require(block.timestamp >= maturityTime, "Too early to resolve");
 
-        // Get the price from the FTSO
-        (uint256 price, int8 decimals, uint64 timestamp) = ftsoV2.getFeedById(priceFeedId);
-        
-        // Normalize the price based on decimals
-        uint256 finalPrice = price;
-        if (decimals < 0) {
-            finalPrice = price * (10 ** uint8(-decimals));
-        } else if (decimals > 0) {
-            finalPrice = price / (10 ** uint8(decimals));
-        }
+        currentPhase = Phase.Maturity;
+        resolveTime = block.timestamp;
 
-        resolveWithFulfilledData(finalPrice, timestamp);
+        // Get the price from the smart contract itself
+        // requestPriceFeed();
+
+        (
+            ,
+            /* uint80 roundID */ int answer,
+            ,
+            /*uint startedAt*/ uint timeStamp /*uint80 answeredInRound*/,
+
+        ) = dataFeed.latestRoundData();
+
+        resolveWithFulfilledData(answer, timeStamp);
     }
 
-    function resolveWithFulfilledData(uint256 _price, uint256 _timestamp) internal {
+    function resolveWithFulfilledData(int _rate, uint256 _timestamp) internal {
+        // Parse price from string to uint
+        // uint finalPrice = parsePrice(oracleDetails.finalPrice);
+
+        int finalPrice = _rate;
+        uint updatedAt = _timestamp;
+
+        uint normalizedPrice = normalizePrice(finalPrice);
+
         resolved = true;
         currentPhase = Phase.Maturity;
-        oracleDetails.finalPrice = _price;
-        resolveTime = block.timestamp;
-        
-        emit MarketResolved(_price, _timestamp);
+        oracleDetails.finalPrice = int256(normalizedPrice);
+        emit MarketResolved(finalPrice, updatedAt);
 
         Side winningSide;
-        if (_price >= oracleDetails.strikePrice) {
+        if (finalPrice >= oracleDetails.strikePrice) {
             winningSide = Side.Long;
         } else {
             winningSide = Side.Short;
@@ -168,7 +190,7 @@ contract BinaryOptionMarketFlare is Ownable {
         require(resolved, "Market is not resolved yet");
         require(!hasClaimed[msg.sender], "Reward already claimed");
 
-        uint256 finalPrice = oracleDetails.finalPrice;
+        int finalPrice = oracleDetails.finalPrice;
 
         Side winningSide;
         if (finalPrice >= oracleDetails.strikePrice) {
@@ -185,23 +207,23 @@ contract BinaryOptionMarketFlare is Ownable {
             userDeposit = longBids[msg.sender];
             totalWinningDeposits = positions.long;
             if (userDeposit > 0) {
-                isWinner = true;
+                isWinner = true; // Người dùng thắng
             }
         } else {
             userDeposit = shortBids[msg.sender];
             totalWinningDeposits = positions.short;
             if (userDeposit > 0) {
-                isWinner = true;
+                isWinner = true; // Người dùng thắng
             }
         }
 
-        // Send outcome event
+        // Gửi sự kiện kết quả thắng/thua
         emit MarketOutcome(winningSide, msg.sender, isWinner);
 
         require(userDeposit > 0, "No deposits on winning side");
 
         uint reward = (userDeposit * totalDeposited) / totalWinningDeposits;
-        uint fee = (reward * feePercentage) / 100;
+        uint fee = (reward * feePercentage) / 1000;
         uint finalReward = reward - fee;
 
         hasClaimed[msg.sender] = true;
@@ -210,18 +232,21 @@ contract BinaryOptionMarketFlare is Ownable {
         emit RewardClaimed(msg.sender, finalReward);
     }
 
-    function withdraw() public onlyOwner {
-        uint amount = address(this).balance;
-        require(amount > 0, "No balance to withdraw.");
+    function withdraw() external onlyOwner {
+    uint feeAmount = (totalDeposited * feePercentage) / 1000; 
 
-        payable(msg.sender).transfer(amount);
-        emit Withdrawal(msg.sender, amount);
-    }
+    require(feeAmount > 0, "No fee to withdraw.");
+    require(address(this).balance >= feeAmount, "Insufficient contract balance.");
+
+    payable(msg.sender).transfer(feeAmount);
+
+    emit Withdrawal(msg.sender, feeAmount);
+}
 
     function startBidding() external onlyOwner {
         require(currentPhase == Phase.Trading, "Market not in trading phase");
-        currentPhase = Phase.Bidding;
         biddingStartTime = block.timestamp;
+        currentPhase = Phase.Bidding;
     }
 
     function expireMarket() external onlyOwner {
@@ -230,15 +255,49 @@ contract BinaryOptionMarketFlare is Ownable {
         currentPhase = Phase.Expiry;
     }
 
-    function getFinalPrice() public view returns (uint256) {
+    function parsePrice(
+        string memory priceString
+    ) internal pure returns (uint) {
+        bytes memory priceBytes = bytes(priceString);
+        uint price = 0;
+
+        for (uint i = 0; i < priceBytes.length; i++) {
+            require(
+                priceBytes[i] >= 0x30 && priceBytes[i] <= 0x39,
+                "Invalid price string"
+            );
+            price = price * 10 + (uint(uint8(priceBytes[i])) - 0x30);
+        }
+
+        return price;
+    }
+
+    function getFinalPrice() public view returns (int) {
         return oracleDetails.finalPrice;
     }
 
-    function getCurrentPrice() public returns (uint256, int8, uint64) {
-        return ftsoV2.getFeedById(priceFeedId);
+    function getChainlinkDataFeedLatestAnswer() public view returns (int) {
+        // prettier-ignore
+        (
+            /* uint80 roundID */,
+            int answer,
+            /*uint startedAt*/,
+            /*uint timeStamp*/,
+            /*uint80 answeredInRound*/
+        ) = dataFeed.latestRoundData();
+        return answer;
     }
-    
-    function getCurrentPriceInWei() public returns (uint256, uint64) {
-        return ftsoV2.getFeedByIdInWei(priceFeedId);
+
+    function normalizePrice(int rawPrice) internal view returns (uint256) {
+        require(rawPrice >= 0, "Invalid negative price");
+        uint8 decimalsFromFeed = priceDecimals;
+
+        if (decimalsFromFeed == 8) {
+            return uint256(rawPrice);
+        } else if (decimalsFromFeed < 8) {
+            return uint256(rawPrice) * (10 ** (8 - decimalsFromFeed));
+        } else {
+            return uint256(rawPrice) / (10 ** (decimalsFromFeed - 8));
+        }
     }
-} 
+}
