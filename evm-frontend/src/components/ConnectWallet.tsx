@@ -1,12 +1,6 @@
 import { Button, ButtonProps, useToast } from "@chakra-ui/react";
-import { ethers, providers } from "ethers";
+import { ethers } from "ethers";
 import React from "react";
-
-declare global {
-  interface Window {
-    ethereum: providers.ExternalProvider;
-  }
-}
 
 interface IProps {
   setWalletAddress?: (address: string) => void;
