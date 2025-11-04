@@ -11,9 +11,11 @@
 ## Deployment Addresses
 
 ### 0G Galileo Testnet
-- **LLM Factory**: `0xbD50d4EdFf462C845887cD58C17Bab4991A9A643`
+- **LLM Factory**: `0xB8C396d35db7673e09Bd053098FAEc52Fc2e51C9`
 - **Chain ID**: 16602 (0x40da)
 - **RPC URL**: `https://evmrpc-testnet.0g.ai`
+
+![First Market on 0G Galileo](./0g-first-market.png)
 
 ## App Flow
 
@@ -63,9 +65,91 @@
 
 Create `.env.local` in `evm-frontend/`:
 ```env
-NEXT_PUBLIC_LLM_FACTORY_ADDRESS=0xbD50d4EdFf462C845887cD58C17Bab4991A9A643
+NEXT_PUBLIC_LLM_FACTORY_ADDRESS=0xB8C396d35db7673e09Bd053098FAEc52Fc2e51C9
 NEXT_PUBLIC_ORACLE_API_URL=http://localhost:4000/api
 ```
+
+## Running the Oracle Service (0G Chatbot)
+
+The oracle service is required for resolving LLM-based markets. It uses the 0G Network to query LLM models for price data.
+
+### Prerequisites
+- Node.js 16+ and npm
+- Private key with testnet ETH (for 0G Network transactions)
+- Access to 0G Galileo Testnet
+
+### Quick Start
+
+1. **Navigate to oracle service**:
+   ```bash
+   cd 0g-chatbot
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   npm install
+   ```
+
+3. **Set up environment variables**:
+   Create `.env` file in `0g-chatbot/`:
+   ```env
+   PRIVATE_KEY=your_private_key_here_without_0x_prefix
+   PORT=4000
+   NODE_ENV=development
+   ```
+
+4. **Build the project**:
+   ```bash
+   npm run build
+   ```
+
+5. **Start the server**:
+   ```bash
+   npm start
+   ```
+   
+   Or for development with hot reload:
+   ```bash
+   npm run dev
+   ```
+
+6. **Access the service**:
+   - **REST API**: http://localhost:4000
+   - **Swagger UI**: http://localhost:4000/docs
+   - **Web Chat Interface**: http://localhost:4000/chat
+
+### Oracle Service Features
+
+- **LLM Market Resolution**: Automatically resolves markets by querying LLM models via 0G Network
+- **REST API**: Provides endpoints for market resolution
+- **Web Chat Interface**: Interactive interface for testing LLM queries
+- **Automatic Payment Processing**: Handles 0G Network payments for AI queries
+
+### Oracle API Endpoints
+
+#### `POST /api/oracle/resolve-market`
+Resolve an LLM-based market using LLM price data.
+
+**Request:**
+```json
+{
+  "marketAddress": "0x...",
+  "tradingPair": "ETH/USD",
+  "providerAddress": "0x..." // Optional: 0G provider address
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "transactionHash": "0x...",
+  "price": "4000.50",
+  "timestamp": 1234567890
+}
+```
+
+See [0g-chatbot/README.md](./0g-chatbot/README.md) for complete API documentation.
 
 ## Work-In-Progress 🚧
 
