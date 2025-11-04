@@ -3,8 +3,11 @@ import { ethers } from 'ethers';
 import { Box, Button, Input, VStack, useToast, HStack, Icon, SimpleGrid, Text, Select, Divider, Progress, InputGroup, InputRightAddon, Spinner, Slider, SliderTrack, SliderFilledTrack, SliderThumb, Tooltip, InputRightElement } from '@chakra-ui/react';
 import { FaEthereum, FaWallet, FaArrowUp, FaArrowDown, FaClock } from 'react-icons/fa';
 import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketChainlinkABI.json';
+import BinaryOptionMarketLLM from '../contracts/abis/BinaryOptionMarketLLMABI.json';
 import Factory from '../contracts/abis/FactoryABI.json';
-import { FACTORY_ADDRESS, getFactoryAddress } from '../config/contracts';
+import { FACTORY_ADDRESS, getFactoryAddress, getLLMFactoryAddress, getLLMFactoryABI } from '../config/contracts';
+import { getProvider } from '../config/network';
+import { switchNetwork } from '../utils/networkSwitcher';
 import { setContractTradingPair } from '../config/tradingPairs';
 import { useAuth } from '../context/AuthContext';
 import { UnorderedList, ListItem } from '@chakra-ui/react';
@@ -74,6 +77,10 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
   // State for index background
   const [indexBg, setIndexBg] = useState<number>(1); // Background index for UI
 
+  // State for oracle type selection
+  const [oracleType, setOracleType] = useState<'chainlink' | 'llm'>('chainlink'); // Oracle type: Chainlink or LLM
+  const [oracleAddress, setOracleAddress] = useState(''); // Oracle address for LLM markets
+
   // Factory contract address from config
   const FactoryAddress = FACTORY_ADDRESS; // Address of the factory contract
   const toast = useToast(); // Toast notification handler
@@ -93,6 +100,17 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       return getFactoryAddress(chainIdHex);
     }
     return FACTORY_ADDRESS;
+  };
+
+  // Helper function to get LLM factory address for current chain
+  const getCurrentLLMFactoryAddress = async (): Promise<string> => {
+    if (window.ethereum) {
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const network = await provider.getNetwork();
+      const chainIdHex = '0x' + network.chainId.toString(16);
+      return getLLMFactoryAddress(chainIdHex);
+    }
+    return '';
   };
 
   // Handler for coin selection dropdown
@@ -311,7 +329,9 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
     setFeePercentage('1'); // Reset fee percentage
     setDaysToExercise('Not set'); // Reset days to exercise
     setCurrentPrice(null); // Reset current price
-    setPriceChangePercent(0); // Reset price change percentag
+    setPriceChangePercent(0); // Reset price change percentage
+    setOracleType('chainlink'); // Reset oracle type
+    setOracleAddress(''); // Reset oracle address
   };
 
   // Estimate gas for contract deployment
@@ -425,12 +445,82 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
         return; // Exit if fields are not filled
       }
 
-      const provider = new ethers.providers.Web3Provider(window.ethereum); // Create provider
-      const signer = provider.getSigner(); // Get signer
+      // For LLM oracle, check if oracle address is provided
+      if (oracleType === 'llm' && !oracleAddress) {
+        toast({
+          title: "Missing Oracle Address",
+          description: "Please provide an oracle address for LLM markets.",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
 
-      // Get current network to adapt parameters
-      const network = await provider.getNetwork(); // Get network information
-      console.log("Deploying on network:", network.name, network.chainId); // Log network information
+      // Validate oracle address format for LLM
+      if (oracleType === 'llm' && !ethers.utils.isAddress(oracleAddress)) {
+        toast({
+          title: "Invalid Oracle Address",
+          description: "Please provide a valid Ethereum address for the oracle.",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+
+      // Create provider - let it auto-detect network from MetaMask
+      let provider = await getProvider();
+      let signer = provider.getSigner();
+
+      // Get current network from MetaMask
+      let network = await provider.getNetwork();
+      const chainIdHex = '0x' + network.chainId.toString(16);
+      console.log("Current network from MetaMask:", network.name, network.chainId, "chainIdHex:", chainIdHex);
+      
+      // For LLM markets, ensure we're on 0G network
+      if (oracleType === 'llm') {
+        const llmFactoryAddress = await getCurrentLLMFactoryAddress();
+        if (!llmFactoryAddress) {
+          throw new Error("LLM Factory not configured for this network. Please set NEXT_PUBLIC_LLM_FACTORY_ADDRESS.");
+        }
+        
+        // Check if we're on 0G network (chainId 16602 or 0x40da)
+        const isOnOGNetwork = network.chainId === 16602 || chainIdHex === '0x40da';
+        
+        if (!isOnOGNetwork) {
+          toast({
+            title: "Switching Network",
+            description: "Switching to 0G Galileo Testnet to deploy LLM markets...",
+            status: "info",
+            duration: 3000,
+            isClosable: true,
+          });
+          
+          // Attempt to switch network
+          const switched = await switchNetwork('0x40da');
+          if (!switched) {
+            throw new Error("Please switch to 0G Galileo Testnet (Chain ID: 16602) to deploy LLM markets. The network switch was cancelled or failed.");
+          }
+          
+          // Wait for network switch to complete and MetaMask to update
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Re-get provider after switch to ensure we have the updated network
+          provider = await getProvider();
+          signer = provider.getSigner();
+          network = await provider.getNetwork();
+          
+          console.log("After network switch - network:", network.name, network.chainId);
+          
+          // Verify we're on the correct network
+          if (network.chainId !== 16602) {
+            throw new Error("Failed to switch to 0G Galileo Testnet. Current network: " + network.name + " (Chain ID: " + network.chainId + "). Please switch to 0G Galileo Testnet manually in MetaMask.");
+          }
+        } else {
+          console.log("Already on 0G Galileo Testnet, proceeding with deployment");
+        }
+      }
 
       // Convert float to large integer by multiplying with MULTIPLIER
       const strikePriceFloat = parseFloat(strikePrice); // Parse strike price as float
@@ -443,32 +533,13 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       // Convert fee percentage to the format expected by the contract (multiply by 10)
       const feeValue = Math.round(parseFloat(feePercentage) * 10); // Convert fee percentage to integer
 
-      // Create a factory with signer
-      const factory = new ethers.ContractFactory(
-        BinaryOptionMarket.abi,
-        BinaryOptionMarket.bytecode,
-        signer
-      );
-      setDeployProgress(2);
-      // IMPORTANT: Use the normalized price feed address from selectedCoin
-      // Get network-appropriate price feed address
-      const normalizedPriceFeedAddress = ethers.utils.getAddress(selectedCoin.priceFeedAddress); // Normalize price feed address
-
       // Generate a random indexBg value between 1 and 10
       const randomIndexBg = Math.floor(Math.random() * 10) + 1; // Generate random index background
 
-      console.log("Deploying contract with parameters:", {
-        strikePrice: strikePriceValue.toString(), // Log strike price
-        owner: await signer.getAddress(), // Log owner address
-        tradingPair: selectedCoin.label, // Log trading pair
-        priceFeedAddress: normalizedPriceFeedAddress, // Log price feed address
-        maturityTime: maturityTimestamp, // Log maturity timestamp
-        feePercentage: feeValue, // Log fee percentage
-        indexBg: randomIndexBg // Log index background
-      });
-
       // Adjust gas parameters based on network - with proper typing
+      // Note: chainId cannot be overridden - it's determined by the provider's network
       const overrides: { gasLimit?: any; gasPrice?: any } = {}; // Gas parameters
+      
       if (network.chainId === 1) {
         // Mainnet requires more careful gas settings
         overrides.gasLimit = ethers.utils.hexlify(3000000); // Set gas limit for mainnet
@@ -479,75 +550,275 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
       } else if (network.chainId === 11155111) {
         // Sepolia testnet
         overrides.gasLimit = ethers.utils.hexlify(3000000); // Set gas limit for Sepolia
+      } else if (network.chainId === 16602) {
+        // 0G Galileo testnet
+        overrides.gasLimit = ethers.utils.hexlify(3000000); // Set gas limit for 0G
       } else {
         // Local or other networks
         overrides.gasLimit = ethers.utils.hexlify(6000000); // Set gas limit for local or other networks
       }
 
-      // Deploy with ALL required parameters in correct order
-      const contract = await factory.deploy(
-        strikePriceValue,                // int _strikePrice
-        await signer.getAddress(),       // address _owner
-        selectedCoin.label,              // string memory _tradingPair
-        normalizedPriceFeedAddress,      // address _priceFeedAddress
-        maturityTimestamp,               // uint _maturityTime
-        feeValue,                        // uint _feePercentage
-        randomIndexBg,                   // uint _indexBg
-        overrides                        // Gas parameters
-      );
+      let contractAddress: string;
 
-      console.log("Transaction hash:", contract.deployTransaction.hash); // Log transaction hash
+      if (oracleType === 'llm') {
+        // Deploy LLM market via LLM Factory
+        setDeployProgress(2);
+        const llmFactoryAddress = await getCurrentLLMFactoryAddress();
+        
+        if (!llmFactoryAddress) {
+          throw new Error("LLM Factory not configured for this network. Please set NEXT_PUBLIC_LLM_FACTORY_ADDRESS.");
+        }
 
-      // Show toast while waiting for deployment
-      const deployToastId = toast({
-        title: "Deploying Market", // Toast title
-        description: `Transaction submitted: ${contract.deployTransaction.hash.substring(0, 10)}...`, // Toast description
-        status: "info", // Toast status
-        duration: null, // No duration for loading toast
-        isClosable: true, // Allow toast to be closed
-      });
+        const llmFactoryABI = getLLMFactoryABI();
+        const llmFactoryContract = new ethers.Contract(llmFactoryAddress, llmFactoryABI, signer);
 
-      // Wait for contract to be deployed
-      await contract.deployed(); // Wait for deployment
+        // Convert strike price to int256 for LLM contract (factory expects int256)
+        // Convert to BigNumber first, then it will be encoded as int256 by ethers
+        const strikePriceInt = ethers.BigNumber.from(strikePriceInteger.toString());
 
-      // Update toast to show success
-      toast.update(deployToastId, {
-        title: "Market Deployed", // Toast title
-        description: `Contract deployed at: ${contract.address}`, // Toast description
-        status: "success", // Toast status
-        duration: 5000, // Toast duration
-      });
+        // Normalize oracle address
+        const normalizedOracleAddress = ethers.utils.getAddress(oracleAddress);
 
-      console.log("Contract deployed to:", contract.address); // Log deployed contract address
-      setContractAddress(contract.address); // Update contract address state
+        console.log("Deploying LLM market with parameters:", {
+          strikePrice: strikePriceInt,
+          owner: await signer.getAddress(),
+          tradingPair: selectedCoin.label,
+          oracleAddress: normalizedOracleAddress,
+          maturityTime: maturityTimestamp,
+          feePercentage: feeValue,
+          indexBg: randomIndexBg
+        });
 
-      // Register with Factory contract on current network
-      const currentFactoryAddress = await getCurrentFactoryAddress();
-      const factoryContract = new ethers.Contract(currentFactoryAddress, Factory.abi, signer); // Create factory contract instance
-      const registerTx = await factoryContract.deploy(contract.address, overrides); // Register contract with factory
+        const deployToastId = toast({
+          title: "Deploying LLM Market",
+          description: "Creating market via LLM Factory...",
+          status: "info",
+          duration: null,
+          isClosable: true,
+        });
 
-      // Show toast while waiting for registration
-      const registerToastId = toast({
-        title: "Registering with Factory", // Toast title
-        description: `Transaction submitted: ${registerTx.hash.substring(0, 10)}...`, // Toast description
-        status: "info", // Toast status
-        duration: null, // No duration for loading toast
-        isClosable: true, // Allow toast to be closed
-      });
+        // Verify signer has correct chainId before sending transaction
+        const signerChainId = await signer.getChainId();
+        console.log("Signer chainId:", signerChainId);
+        if (signerChainId !== 16602) {
+          throw new Error(`Invalid chainId: ${signerChainId}. Expected 16602 for 0G Galileo Testnet.`);
+        }
 
-      // Wait for transaction to be mined
-      await registerTx.wait(); // Wait for registration transaction
+        // Validate parameters before sending transaction
+        const ownerAddress = await signer.getAddress();
+        console.log("Validating parameters:", {
+          strikePriceInt: strikePriceInt.toString(),
+          owner: ownerAddress,
+          tradingPair: selectedCoin.label,
+          oracleAddress: normalizedOracleAddress,
+          maturityTimestamp,
+          feeValue,
+          indexBg: randomIndexBg,
+          currentTimestamp: Math.floor(Date.now() / 1000),
+          blockTimestamp: (await provider.getBlock('latest')).timestamp
+        });
 
-      // Update toast
-      toast.update(registerToastId, {
-        title: "Registration Complete", // Toast title
-        description: "Market registered with Factory", // Toast description
-        status: "success", // Toast status
-        duration: 5000, // Toast duration
-      });
+        // Check maturity time is in the future - use block timestamp from chain
+        const latestBlock = await provider.getBlock('latest');
+        const blockTimestamp = latestBlock.timestamp;
+        console.log("Block timestamp:", blockTimestamp, "Maturity timestamp:", maturityTimestamp);
+        if (maturityTimestamp <= blockTimestamp) {
+          throw new Error(`Maturity time must be in the future. Block time: ${blockTimestamp}, Maturity: ${maturityTimestamp}. Please set a future date/time.`);
+        }
+
+        // Check fee percentage is valid (1-200, representing 0.1% to 20%)
+        if (feeValue < 1 || feeValue > 200) {
+          throw new Error(`Fee percentage must be between 1 and 200 (0.1% to 20%). Got: ${feeValue}`);
+        }
+
+        // Check indexBg is valid (1-10)
+        if (randomIndexBg < 1 || randomIndexBg > 10) {
+          throw new Error(`Index background must be between 1 and 10. Got: ${randomIndexBg}`);
+        }
+
+        // Try to estimate gas first to catch any revert reasons
+        // Note: We skip gas estimation if it fails, as some networks may not support it well
+        // The transaction will still be sent and MetaMask will show the actual error if it fails
+        try {
+          const estimatedGas = await llmFactoryContract.estimateGas.createMarket(
+            strikePriceInt,
+            await signer.getAddress(),
+            selectedCoin.label,
+            normalizedOracleAddress,
+            maturityTimestamp,
+            feeValue,
+            randomIndexBg
+          );
+          console.log("Gas estimation successful:", estimatedGas.toString());
+        } catch (gasError: any) {
+          console.warn("Gas estimation failed (continuing anyway - MetaMask will show error if transaction fails):", gasError);
+          // Don't throw here - let the actual transaction attempt proceed
+          // MetaMask will show the actual error if the transaction fails
+        }
+
+        const createMarketTx = await llmFactoryContract.createMarket(
+          strikePriceInt,
+          await signer.getAddress(),
+          selectedCoin.label,
+          normalizedOracleAddress,
+          maturityTimestamp,
+          feeValue,
+          randomIndexBg,
+          overrides
+        );
+
+        toast.update(deployToastId, {
+          title: "Deploying LLM Market",
+          description: `Transaction submitted: ${createMarketTx.hash.substring(0, 10)}...`,
+          status: "info",
+          duration: null,
+          isClosable: true,
+        });
+
+        let receipt;
+        try {
+          receipt = await createMarketTx.wait();
+        } catch (error: any) {
+          // If transaction reverted, try to get the revert reason
+          if (error.receipt && error.receipt.status === 0) {
+            console.error("Transaction reverted. Receipt:", error.receipt);
+            
+            // Try to call the contract to see what the issue might be
+            try {
+              // Estimate gas to see if there's a revert reason
+              await llmFactoryContract.estimateGas.createMarket(
+                strikePriceInt,
+                await signer.getAddress(),
+                selectedCoin.label,
+                normalizedOracleAddress,
+                maturityTimestamp,
+                feeValue,
+                randomIndexBg
+              );
+            } catch (estimateError: any) {
+              console.error("Gas estimation error:", estimateError);
+              const revertReason = estimateError.reason || estimateError.message || "Unknown revert reason";
+              throw new Error(`Transaction reverted: ${revertReason}`);
+            }
+            
+            throw new Error("Transaction reverted on-chain. Check the transaction on the block explorer for details.");
+          }
+          throw error;
+        }
+
+        // Check if transaction was successful
+        if (receipt.status === 0) {
+          throw new Error("Transaction reverted on-chain. Check the transaction on the block explorer for details.");
+        }
+
+        // Get the market address from the MarketCreated event
+        const marketCreatedEvent = receipt.events?.find((e: any) => e.event === 'MarketCreated');
+        if (!marketCreatedEvent) {
+          throw new Error("MarketCreated event not found in transaction receipt");
+        }
+        
+        contractAddress = marketCreatedEvent.args.marketAddress;
+
+        toast.update(deployToastId, {
+          title: "LLM Market Deployed",
+          description: `Market deployed at: ${contractAddress}`,
+          status: "success",
+          duration: 5000,
+        });
+
+        console.log("LLM Market deployed to:", contractAddress);
+      } else {
+        // Deploy Chainlink market (existing logic)
+        setDeployProgress(2);
+        // Create a factory with signer
+        const factory = new ethers.ContractFactory(
+          BinaryOptionMarket.abi,
+          BinaryOptionMarket.bytecode,
+          signer
+        );
+
+        // IMPORTANT: Use the normalized price feed address from selectedCoin
+        // Get network-appropriate price feed address
+        const normalizedPriceFeedAddress = ethers.utils.getAddress(selectedCoin.priceFeedAddress); // Normalize price feed address
+
+        console.log("Deploying Chainlink market with parameters:", {
+          strikePrice: strikePriceValue.toString(),
+          owner: await signer.getAddress(),
+          tradingPair: selectedCoin.label,
+          priceFeedAddress: normalizedPriceFeedAddress,
+          maturityTime: maturityTimestamp,
+          feePercentage: feeValue,
+          indexBg: randomIndexBg
+        });
+
+        // Deploy with ALL required parameters in correct order
+        const contract = await factory.deploy(
+          strikePriceValue,                // int _strikePrice
+          await signer.getAddress(),       // address _owner
+          selectedCoin.label,              // string memory _tradingPair
+          normalizedPriceFeedAddress,      // address _priceFeedAddress
+          maturityTimestamp,               // uint _maturityTime
+          feeValue,                        // uint _feePercentage
+          randomIndexBg,                   // uint _indexBg
+          overrides                        // Gas parameters
+        );
+
+        console.log("Transaction hash:", contract.deployTransaction.hash);
+
+        // Show toast while waiting for deployment
+        const deployToastId = toast({
+          title: "Deploying Market",
+          description: `Transaction submitted: ${contract.deployTransaction.hash.substring(0, 10)}...`,
+          status: "info",
+          duration: null,
+          isClosable: true,
+        });
+
+        // Wait for contract to be deployed
+        await contract.deployed();
+
+        // Update toast to show success
+        toast.update(deployToastId, {
+          title: "Market Deployed",
+          description: `Contract deployed at: ${contract.address}`,
+          status: "success",
+          duration: 5000,
+        });
+
+        console.log("Contract deployed to:", contract.address);
+        contractAddress = contract.address;
+
+        // Register with Factory contract on current network
+        const currentFactoryAddress = await getCurrentFactoryAddress();
+        const factoryContract = new ethers.Contract(currentFactoryAddress, Factory.abi, signer);
+        const registerTx = await factoryContract.deploy(contract.address, overrides);
+
+        // Show toast while waiting for registration
+        const registerToastId = toast({
+          title: "Registering with Factory",
+          description: `Transaction submitted: ${registerTx.hash.substring(0, 10)}...`,
+          status: "info",
+          duration: null,
+          isClosable: true,
+        });
+
+        // Wait for transaction to be mined
+        await registerTx.wait();
+
+        // Update toast
+        toast.update(registerToastId, {
+          title: "Registration Complete",
+          description: "Market registered with Factory",
+          status: "success",
+          duration: 5000,
+        });
+      }
+
+      // Update contract address state
+      setContractAddress(contractAddress);
 
       // Update deployed contracts list
-      setDeployedContracts([...deployedContracts, contract.address]); // Update deployed contracts state
+      setDeployedContracts([...deployedContracts, contractAddress]);
 
       // Reset form after successful deployment
       resetForm(); // Reset form fields
@@ -673,34 +944,97 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
     try {
       // Check if wallet is connected
       if (!walletAddress) {
-        console.log("No wallet address available"); // Log if no wallet address
-        return; // Exit if no wallet address
+        console.log("No wallet address available");
+        return;
       }
 
-      const provider = new ethers.providers.Web3Provider(window.ethereum); // Create provider
-      const contract = new ethers.Contract(FactoryAddress, Factory.abi, provider); // Create factory contract instance
-
-      // Debug logs
-      console.log("Fetching contracts for address:", walletAddress); // Log wallet address
-      console.log("Using Factory at:", FactoryAddress); // Log factory address
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const network = await provider.getNetwork();
+      const chainIdHex = '0x' + network.chainId.toString(16);
 
       // Add valid address check
       if (!ethers.utils.isAddress(walletAddress)) {
-        throw new Error("Invalid wallet address"); // Throw error if wallet address is invalid
+        throw new Error("Invalid wallet address");
       }
 
-      const contracts = await contract.getContractsByOwner(walletAddress); // Fetch contracts by owner
-      console.log("Contracts fetched:", contracts); // Log fetched contracts
-      setDeployedContracts(contracts); // Update deployed contracts state
+      const allContracts: string[] = [];
+
+      // Fetch from Chainlink Factory (if exists and has getContractsByOwner)
+      try {
+        const chainlinkFactoryAddress = await getCurrentFactoryAddress();
+        if (chainlinkFactoryAddress) {
+          const chainlinkFactory = new ethers.Contract(chainlinkFactoryAddress, Factory.abi, provider);
+          
+          // Try to use getContractsByOwner if it exists
+          try {
+            const chainlinkContracts = await chainlinkFactory.getContractsByOwner(walletAddress);
+            if (chainlinkContracts && chainlinkContracts.length > 0) {
+              allContracts.push(...chainlinkContracts);
+              console.log("Chainlink contracts fetched:", chainlinkContracts.length);
+            }
+          } catch (e) {
+            // Method doesn't exist or failed, try fetching from events
+            console.log("getContractsByOwner not available, fetching from events");
+            const filter = chainlinkFactory.filters.Deployed(walletAddress);
+            const events = await chainlinkFactory.queryFilter(filter);
+            const addresses = events.map((e: any) => e.args?.contractAddress).filter(Boolean);
+            allContracts.push(...addresses);
+            console.log("Chainlink contracts from events:", addresses.length);
+          }
+        }
+      } catch (error) {
+        console.log("Chainlink factory not available or error:", error);
+      }
+
+      // Fetch from LLM Factory (get all markets and filter by owner)
+      try {
+        const llmFactoryAddress = await getCurrentLLMFactoryAddress();
+        if (llmFactoryAddress) {
+          const llmFactoryABI = getLLMFactoryABI();
+          const llmFactory = new ethers.Contract(llmFactoryAddress, llmFactoryABI, provider);
+          
+          // Get all deployed markets
+          const allMarkets = await llmFactory.getDeployedMarkets();
+          console.log("Total LLM markets:", allMarkets.length);
+          
+          // Filter markets by owner
+          const ownedMarkets: string[] = [];
+          
+          for (const marketAddress of allMarkets) {
+            try {
+              const marketContract = new ethers.Contract(marketAddress, BinaryOptionMarketLLM, provider);
+              const owner = await marketContract.owner();
+              if (owner.toLowerCase() === walletAddress.toLowerCase()) {
+                ownedMarkets.push(marketAddress);
+              }
+            } catch (e) {
+              // Skip invalid contracts
+              console.log("Error checking market:", marketAddress, e);
+            }
+          }
+          
+          if (ownedMarkets.length > 0) {
+            allContracts.push(...ownedMarkets);
+            console.log("LLM contracts owned by user:", ownedMarkets.length);
+          }
+        }
+      } catch (error) {
+        console.log("LLM factory not available or error:", error);
+      }
+
+      // Remove duplicates and update state
+      const uniqueContracts = Array.from(new Set(allContracts));
+      console.log("Total unique contracts fetched:", uniqueContracts.length);
+      setDeployedContracts(uniqueContracts);
 
     } catch (error: any) {
-      console.error("Failed to fetch contracts:", error); // Log error if fetching fails
+      console.error("Failed to fetch contracts:", error);
       toast({
-        title: "Error fetching contracts", // Toast title
-        description: "Please make sure your wallet is connected", // Toast description
-        status: "error", // Toast status
-        duration: 5000, // Toast duration
-        isClosable: true, // Allow toast to be closed
+        title: "Error fetching contracts",
+        description: error.message || "Please make sure your wallet is connected",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
       });
     }
   };
@@ -886,6 +1220,74 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
                       applied to winning positions and distributed to you as the market creator.
                     </Text>
                   </Box>
+
+                  {/* Oracle type selection */}
+                  <Box>
+                    <Text color="white" mb={4} fontWeight="bold">ORACLE TYPE:</Text>
+                    <Select
+                      value={oracleType}
+                      onChange={(e) => setOracleType(e.target.value as 'chainlink' | 'llm')}
+                      bg="rgba(255,255,255,0.1)"
+                      border="1px solid rgba(255,255,255,0.2)"
+                      color="white"
+                      borderRadius="xl"
+                      h="60px"
+                      _hover={{
+                        borderColor: "white",
+                      }}
+                      _focus={{
+                        borderColor: "white",
+                        boxShadow: "0 0 0 1px white",
+                      }}
+                      icon={<Icon as={FaEthereum} color="white" />}
+                    >
+                      <option
+                        value="chainlink"
+                        style={{
+                          backgroundColor: "#0a1647",
+                          color: "white"
+                        }}
+                      >
+                        Chainlink Oracle
+                      </option>
+                      <option
+                        value="llm"
+                        style={{
+                          backgroundColor: "#0a1647",
+                          color: "white"
+                        }}
+                      >
+                        LLM Oracle
+                      </option>
+                    </Select>
+                  </Box>
+
+                  {/* Oracle address input for LLM */}
+                  {oracleType === 'llm' && (
+                    <Box>
+                      <Text color="white" mb={4} fontWeight="bold">ORACLE ADDRESS:</Text>
+                      <Input
+                        placeholder="Enter oracle wallet address (0x...)"
+                        value={oracleAddress}
+                        onChange={(e) => setOracleAddress(e.target.value)}
+                        bg="rgba(255,255,255,0.1)"
+                        border="1px solid rgba(255,255,255,0.2)"
+                        color="white"
+                        borderRadius="xl"
+                        h="60px"
+                        _hover={{
+                          borderColor: "white",
+                        }}
+                        _focus={{
+                          borderColor: "white",
+                          boxShadow: "0 0 0 1px white",
+                        }}
+                      />
+                      <Text color="gray.400" fontSize="sm" mt={2}>
+                        This address will be authorized to resolve the market using LLM oracle.
+                      </Text>
+                    </Box>
+                  )}
 
                   {/* Asset selection dropdown */}
                   <Box>
@@ -1295,7 +1697,7 @@ const Owner: React.FC<OwnerProps> = ({ address }) => {
                   transform: 'translateY(-2px)'
                 }}
                 transition="all 0.2s"
-                isDisabled={!selectedCoin || !strikePrice || !maturityDate || !maturityTime}
+                isDisabled={!selectedCoin || !strikePrice || !maturityDate || !maturityTime || (oracleType === 'llm' && !oracleAddress)}
 
               >
                 Create market

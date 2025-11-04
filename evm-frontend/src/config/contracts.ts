@@ -2,6 +2,7 @@ import deployedAddress from '../../deployed_address.json';
 import FlareFactoryABI from '../contracts/abis/FlareFactoryABI.json';
 import FactoryABI from '../contracts/abis/FactoryABI.json';
 import FlarePriceFeedHelperABI from '../contracts/abis/FlarePriceFeedHelperABI.json';
+import BinaryOptionMarketLLMFactoryABI from '../contracts/abis/BinaryOptionMarketLLMFactoryABI.json';
 
 // Factory addresses per chain
 export const FACTORY_ADDRESSES: { [chainId: string]: string } = {
@@ -13,6 +14,25 @@ export const FACTORY_ADDRESSES: { [chainId: string]: string } = {
 
 export const FACTORY_ADDRESS = deployedAddress.FactoryAddress; // Default factory address
 export const PRICE_FEED_HELPER_ADDRESS = deployedAddress.PriceFeedHelperAddress;
+
+// LLM Factory addresses per chain
+export const LLM_FACTORY_ADDRESSES: { [chainId: string]: string } = {
+  '0xaa36a7': process.env.NEXT_PUBLIC_LLM_FACTORY_ADDRESS || '', // Sepolia
+  '0x40da': '0xB8C396d35db7673e09Bd053098FAEc52Fc2e51C9', // 0G Galileo Testnet - deployed (fixed)
+  // Add other chains as needed after deployment
+};
+
+export const LLM_FACTORY_ADDRESS = LLM_FACTORY_ADDRESSES['0x40da'] || LLM_FACTORY_ADDRESSES['0xaa36a7'] || process.env.NEXT_PUBLIC_LLM_FACTORY_ADDRESS || '';
+
+// Function to get LLM factory address for current chain
+export const getLLMFactoryAddress = (chainId: string): string => {
+  return LLM_FACTORY_ADDRESSES[chainId] || LLM_FACTORY_ADDRESS;
+};
+
+// Function to get LLM Factory ABI
+export const getLLMFactoryABI = () => {
+  return BinaryOptionMarketLLMFactoryABI;
+};
 
 // Function to get factory address for current chain
 export const getFactoryAddress = (chainId: string): string => {

@@ -4,13 +4,26 @@ require("dotenv").config();
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
     solidity: {
-        version: "0.8.20",
-        settings: {
-            optimizer: {
-                enabled: true,
-                runs: 200
+        compilers: [
+            {
+                version: "0.8.20",
+                settings: {
+                    optimizer: {
+                        enabled: true,
+                        runs: 200
+                    }
+                }
+            },
+            {
+                version: "0.8.26",
+                settings: {
+                    optimizer: {
+                        enabled: true,
+                        runs: 200
+                    }
+                }
             }
-        }
+        ]
     },
     networks: {
         // Flare Mainnet
@@ -26,6 +39,18 @@ module.exports = {
             accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
             chainId: 114,
             gasPrice: 225000000000, // 225 Gwei
+        },
+        // 0G Galileo Testnet
+        galileo: {
+            url: process.env.GALILEO_RPC_URL || "https://evmrpc-testnet.0g.ai",
+            accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+            chainId: 16602,
+        },
+        // Sepolia Testnet
+        sepolia: {
+            url: process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
+            accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+            chainId: 11155111,
         }
     },
     etherscan: {

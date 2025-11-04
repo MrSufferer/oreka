@@ -42,7 +42,7 @@ export const SUPPORTED_NETWORKS: NetworkInfo[] = [
     chainId: networkConfig.galileo.chainId,
     chainIdHex: '0x40da',
     name: networkConfig.galileo.name,
-    rpcUrl: networkConfig.galileo.rpcUrl,
+    rpcUrl: 'https://evmrpc-testnet.0g.ai',
     blockExplorerUrl: networkConfig.galileo.blockExplorerUrl,
     nativeCurrency: {
       name: '0G',
@@ -86,9 +86,13 @@ export const switchNetwork = async (chainIdHex: string): Promise<boolean> => {
             {
               chainId: chainIdHex,
               chainName: network.name,
-              rpcUrls: network.rpcUrl ? [network.rpcUrl] : [],
-              blockExplorerUrls: network.blockExplorerUrl ? [network.blockExplorerUrl] : [],
-              nativeCurrency: network.nativeCurrency,
+              rpcUrls: network.rpcUrl ? [network.rpcUrl] : ['https://evmrpc-testnet.0g.ai'],
+              blockExplorerUrls: network.blockExplorerUrl ? [network.blockExplorerUrl] : ['https://chainscan-galileo.0g.ai'],
+              nativeCurrency: network.nativeCurrency || {
+                name: '0G',
+                symbol: '0G',
+                decimals: 18,
+              },
             },
           ],
         });

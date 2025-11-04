@@ -27,36 +27,41 @@ export const networkConfig = {
     chainId: 16602,
     name: '0G Galileo Testnet',
     ensAddress: null,
-    rpcUrl: 'https://rpc-testnet.0g.ai',
+    rpcUrl: 'https://evmrpc-testnet.0g.ai',
     blockExplorerUrl: 'https://chainscan-galileo.0g.ai'
   }
 };
 
-export const getProvider = () => {
-  const chainId = window.ethereum.chainId;
-  let networkName, networkChainId;
-  
-  switch (chainId) {
-    case '0x72': // 114 in decimal (Coston2)
-      networkName = networkConfig.coston2.name;
-      networkChainId = networkConfig.coston2.chainId;
-      break;
-    case '0xaa36a7': // 11155111 in decimal (Sepolia)
-      networkName = networkConfig.sepolia.name;
-      networkChainId = networkConfig.sepolia.chainId;
-      break;
-    case '0x40da': // 16602 in decimal (0G Galileo)
-      networkName = networkConfig.galileo.name;
-      networkChainId = networkConfig.galileo.chainId;
-      break;
-    default: // Anvil
-      networkName = networkConfig.anvil.name;
-      networkChainId = networkConfig.anvil.chainId;
+export const getProvider = async () => {
+  // Get chainId from MetaMask first
+  let chainId: string;
+  try {
+    chainId = await window.ethereum.request({ method: 'eth_chainId' });
+  } catch (error) {
+    chainId = window.ethereum.chainId || '0x1';
   }
   
-  return new ethers.providers.Web3Provider(window.ethereum, {
-    name: networkName,
-    chainId: networkChainId,
-    ensAddress: null
-  });
+  // Parse chainId to number
+  const chainIdNum = parseInt(chainId, 16);
+  
+  // For 0G Galileo (16602), explicitly configure the network
+  // This ensures the provider knows the correct chainId for transactions
+  if (chainIdNum === 16602 || chainId === '0x40da') {
+    const provider = new ethers.providers.Web3Provider(window.ethereum, {
+      name: networkConfig.galileo.name,
+      chainId: networkConfig.galileo.chainId,
+      ensAddress: null
+    });
+    
+    const network = await provider.getNetwork();
+    console.log("Detected network from MetaMask:", network.name, network.chainId);
+    return provider;
+  }
+  
+  // For other networks, let ethers auto-detect
+  const provider = new ethers.providers.Web3Provider(window.ethereum);
+  const network = await provider.getNetwork();
+  console.log("Detected network from MetaMask:", network.name, network.chainId);
+  
+  return provider;
 }; 

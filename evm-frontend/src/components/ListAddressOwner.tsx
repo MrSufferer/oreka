@@ -13,8 +13,9 @@ import { FaCoins } from "react-icons/fa";
 import Factory from '../contracts/abis/FactoryABI.json';
 import { useToast } from '@chakra-ui/react';
 import { useRouter } from 'next/router';
-import { FACTORY_ADDRESS, getFactoryAddress } from '../config/contracts';
+import { FACTORY_ADDRESS, getFactoryAddress, getLLMFactoryAddress, getLLMFactoryABI } from '../config/contracts';
 import BinaryOptionMarket from '../contracts/abis/BinaryOptionMarketABI.json';
+import BinaryOptionMarketLLM from '../contracts/abis/BinaryOptionMarketLLMABI.json';
 import { useAuth } from '../context/AuthContext';
 import { PriceService } from '../services/PriceService';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -350,6 +351,34 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
         console.error("Error fetching from events:", error);
       }
 
+      // Also fetch contracts from LLM Factory
+      try {
+        const llmFactoryAddress = getLLMFactoryAddress(chainIdHex);
+        if (llmFactoryAddress) {
+          console.log("Fetching contracts from LLM Factory:", llmFactoryAddress);
+          const llmFactoryABI = getLLMFactoryABI();
+          const llmFactoryContract = new ethers.Contract(llmFactoryAddress, llmFactoryABI, provider);
+          
+          // Query MarketCreated events from LLM Factory
+          const llmFilter = llmFactoryContract.filters.MarketCreated();
+          const llmEvents = await llmFactoryContract.queryFilter(llmFilter);
+          
+          console.log("Found LLM events:", llmEvents.length);
+          
+          // Extract contract addresses from LLM MarketCreated events
+          llmEvents.forEach(event => {
+            const marketAddress = event.args?.marketAddress;
+            if (marketAddress && !allContracts.includes(marketAddress)) {
+              allContracts.push(marketAddress);
+            }
+          });
+          
+          console.log("All contracts including LLM:", allContracts);
+        }
+      } catch (error) {
+        console.error("Error fetching from LLM Factory events:", error);
+      }
+
       // Optionally supplement with owner-specific contracts if we missed any
       const knownOwners = [
         // No need to include hardcoded addresses as we already got all contracts from events
@@ -388,7 +417,28 @@ const ListAddressOwner: React.FC<ListAddressOwnerProps> = ({ ownerAddress, page 
 
       // Fetch detailed data for each contract address
       const contractsData = await Promise.all(allContracts.map(async (address: string) => {
-        const contract = new ethers.Contract(address, BinaryOptionMarket.abi, provider);
+        // Try to determine if it's an LLM contract or regular contract
+        // First try with regular contract ABI, if it fails, try LLM ABI
+        let contract = new ethers.Contract(address, BinaryOptionMarket.abi, provider);
+        let isLLMContract = false;
+
+        try {
+          // Try to call a function that exists on regular contracts
+          await contract.dataFeed();
+        } catch (error) {
+          // If dataFeed() doesn't exist, it might be an LLM contract
+          try {
+            // Try to call a function that exists on LLM contracts
+            const testContract = new ethers.Contract(address, BinaryOptionMarketLLM.abi, provider);
+            await testContract.oracleAddress();
+            contract = testContract;
+            isLLMContract = true;
+            console.log(`Contract ${address} is an LLM contract`);
+          } catch (llmError) {
+            // Neither worked, might be a different contract type
+            console.log(`Contract ${address} - trying regular contract ABI`);
+          }
+        }
 
         try {
           // Get basic data from contract
